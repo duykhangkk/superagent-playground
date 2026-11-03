@@ -20,7 +20,7 @@
         </div>
         <div class="title-group">
           <h1 class="title">YT Upscale</h1>
-          <span class="subtitle">WebGL Real-time AI</span>
+          <span class="subtitle">AMD FSR 1.0 + RCAS WebGL</span>
         </div>
       </div>
       <div class="toggle-wrapper">
@@ -31,12 +31,24 @@
       </div>
     </header>
 
-    <!-- Live Status Banner -->
+    <!-- Split-Screen Quick Compare Mode -->
+    <div class="compare-card">
+      <div class="compare-info">
+        <span class="compare-title">So sánh Trước / Sau</span>
+        <span class="compare-desc">Chia đôi màn hình: Trái gốc | Phải FSR</span>
+      </div>
+      <label class="switch small" title="Bật chia đôi màn hình để thấy ngay sự khác biệt">
+        <input type="checkbox" id="toggleSplitScreen">
+        <span class="slider round"></span>
+      </label>
+    </div>
+
+    <!-- Live Status Card -->
     <section class="status-card" id="statusCard">
       <div class="status-header">
         <div class="status-indicator">
           <span class="status-dot active" id="statusDot"></span>
-          <span class="status-text" id="statusText">Đang sẵn sàng</span>
+          <span class="status-text" id="statusText">Đang Upscale</span>
         </div>
         <span class="fps-badge" id="fpsBadge">60 FPS</span>
       </div>
@@ -65,27 +77,56 @@
           <line x1="12" y1="8" x2="12" y2="12"></line>
           <line x1="12" y1="16" x2="12.01" y2="16"></line>
         </svg>
-        <span id="drmText">Video bảo vệ bản quyền (DRM). Đang hiển thị bản gốc.</span>
+        <span id="drmText">Video bảo vệ bản quyền (DRM). Đang phát video gốc.</span>
       </div>
     </section>
 
     <!-- Controls Section -->
     <main class="controls">
+      <!-- Độ sắc nét (RCAS Sharpening Slider) -->
+      <div class="control-group">
+        <div class="group-label-row">
+          <label class="control-label" for="sliderSharpness">Độ sắc nét (RCAS Sharpening)</label>
+          <span class="value-badge" id="sharpnessVal">75%</span>
+        </div>
+        <input type="range" class="range-slider" id="sliderSharpness" min="0" max="100" value="75" step="5">
+        <div class="slider-labels">
+          <span>0% (Tự nhiên)</span>
+          <span>50%</span>
+          <span>100% (Cực nét)</span>
+        </div>
+      </div>
+
+      <!-- Tỉ lệ Scale -->
+      <div class="control-group">
+        <label class="control-label">Mục tiêu Super-Resolution</label>
+        <div class="segmented-control three-col">
+          <button type="button" class="segment-btn active" data-scale="2x" id="btn2x">
+            2x (4K Ultra)
+          </button>
+          <button type="button" class="segment-btn" data-scale="1.5x" id="btn15x">
+            1.5x (2K QHD)
+          </button>
+          <button type="button" class="segment-btn" data-scale="fit" id="btnFit">
+            Khớp màn
+          </button>
+        </div>
+      </div>
+
       <!-- Thuật toán -->
       <div class="control-group">
         <div class="group-label-row">
-          <label class="control-label">Thuật toán nội suy</label>
-          <span class="info-tag" title="EASU: Tái tạo biên cạnh tốt nhất cho Anime & Game. Lanczos: Chuẩn toán học không làm biến dạng hình học.">Gợi ý</span>
+          <label class="control-label">Thuật toán tái tạo</label>
         </div>
         <div class="radio-cards">
           <label class="radio-card active" id="labelEASU">
             <input type="radio" name="algorithm" value="easu" checked>
             <div class="radio-content">
               <div class="card-title-row">
-                <span class="card-name">AMD FSR EASU</span>
+                <span class="card-name">AMD FSR 1.0 (EASU + RCAS)</span>
                 <span class="card-tag best">Đề xuất</span>
               </div>
-              <p class="card-desc">Edge-Adaptive Spatial Upsampling. Giữ nét viền và khử răng cưa sắc bén.</p>
+              <p class="card-desc">Lọc hướng gradient thích ứng + Khử mờ tương phản cao. Nổi bật viền chữ, mắt, chi tiết anime/game.</p>
             </div>
           </label>
 
@@ -93,30 +134,13 @@
             <input type="radio" name="algorithm" value="lanczos">
             <div class="radio-content">
               <div class="card-title-row">
-                <span class="card-name">Lanczos-3 Sinc</span>
+                <span class="card-name">Lanczos-3 Sinc Resampling</span>
                 <span class="card-tag">Toán học</span>
               </div>
-              <p class="card-desc">Cửa sổ Sinc 36 điểm lấy mẫu. Tái tạo màu sắc trung thực chuẩn điện ảnh.</p>
+              <p class="card-desc">Cửa sổ Sinc 36 tap quét ma trận. Chuyển tiếp mượt mà, màu sắc trung thực chuẩn điện ảnh.</p>
             </div>
           </label>
         </div>
-      </div>
-
-      <!-- Tỉ lệ Scale -->
-      <div class="control-group">
-        <label class="control-label">Mục tiêu độ phân giải</label>
-        <div class="segmented-control">
-          <button type="button" class="segment-btn active" data-scale="fit" id="btnFit">
-            Khớp màn hình (Fit)
-          </button>
-          <button type="button" class="segment-btn" data-scale="2x" id="btn2x">
-            Gấp đôi (2x Native)
-          </button>
-        </div>
-        <p class="hint-text">
-          <span class="hint-dot">💡</span> 
-          <span><strong>Fit</strong> tự động scale khung hình lên khớp mật độ điểm ảnh của màn hình (hỗ trợ tối đa 2K/4K/Retina).</span>
-        </p>
       </div>
     </main>
 
@@ -126,7 +150,7 @@
         <span class="save-indicator" id="saveIndicator">✓ Đã đồng bộ</span>
       </div>
       <div class="footer-right">
-        <span class="version-tag">v1.0.0</span>
+        <span class="version-tag">v1.1.0</span>
       </div>
     </footer>
   </div>

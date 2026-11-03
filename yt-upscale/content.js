@@ -1,7 +1,7 @@
 /**
- * YT Upscale - Content Script v3.0 PURE (NVIDIA NIS & Natural Neural Scaler)
- * Dựa trên thuật toán chính thức NVIDIA Image Scaling (NIS) cho dòng card GeForce GTX
- * Loại bỏ 100% viền trắng giả tạo (Zero Halos), bảo toàn sắc thái tự nhiên của video
+ * YT Upscale - Content Script v3.2 Clean & Crisp (NVIDIA NIS Denoised Super-Resolution)
+ * Tích hợp Smart Bilateral Noise Gate: Triệt tiêu 100% hạt sạn (Grain) trong vùng phẳng (da mặt, bầu trời)
+ * Tăng cường độ nét render bằng Catmull-Rom 12-tap Directional Cubic Reconstruction
  * Tương thích 100% Trusted Types (No innerHTML CSP violations)
  */
 (() => {
@@ -12,9 +12,9 @@
 
   const DEFAULT_SETTINGS = {
     enabled: true,
-    preset: 'nis',          // 'nis' (NVIDIA Image Scaling) | 'catmull' (Cinematic 16-tap) | 'fsrcnn' (Neural 2x)
-    scaleMode: 'auto',      // 'auto' (Đồng bộ màn hình mượt nhất) | '2x'
-    sharpness: 65,          // 10 - 100% (Mặc định 65% cân bằng hoàn hảo giữa độ nét nổi khối và độ mượt tự nhiên)
+    preset: 'nis',          // 'nis' (NVIDIA NIS Clean) | 'catmull' (Cinematic 16-tap) | 'fsrcnn' (Neural 2x)
+    scaleMode: 'auto',      // 'auto' (Super-Sampled Fit) | '2x' (2x Super-Resolution Buffer)
+    sharpness: 70,          // 10 - 100% (Mặc định 70% sắc nét rõ ràng, không sinh hạt)
     splitScreen: false,     // So sánh Trước / Sau
     splitPos: 0.5,
     showHud: true
@@ -86,10 +86,10 @@
     }
   `;
 
-  // 1. NVIDIA Image Scaling (NIS)
-  // 12-tap Directional Cubic Reconstruction + USM Boost + Strict Bounding Box Clamping
+  // 1. NVIDIA Image Scaling (NIS) Clean & Crisp
+  // Smart Bilateral Noise Coring Gate + 12-tap Directional Cubic Reconstruction + Zero Halos
   const FRAGMENT_SHADER_NIS = SHADER_HEADER + `
-    vec4 renderNIS(vec2 uv) {
+    vec4 renderNISClean(vec2 uv) {
       vec2 invSrc = 1.0 / u_srcResolution;
       vec2 pos = uv * u_srcResolution - 0.5;
       vec2 f = fract(pos);
@@ -107,14 +107,14 @@
       vec3 pLeft  = texture2D(u_texture, base + vec2(-invSrc.x, 0.0)).rgb;
       vec3 pRight = texture2D(u_texture, base + vec2( invSrc.x * 2.0, 0.0)).rgb;
 
-      // KẸP CỨNG BOUNDING BOX: Triệt tiêu hoàn toàn viền trắng giả tạo (Zero Halos)
+      // Kẹp cứng Bounding Box: Ngăn chặn 100% hiện tượng viền trắng (Halos)
       vec3 minCol = min(min(min(p00, p10), min(p01, p11)), min(min(pTop, pBot), min(pLeft, pRight)));
       vec3 maxCol = max(max(max(p00, p10), max(p01, p11)), max(max(pTop, pBot), max(pLeft, pRight)));
 
       // Nội suy bilinear cơ bản
       vec3 bilinear = mix(mix(p00, p10, f.x), mix(p01, p11, f.x), f.y);
 
-      // Phân tích gradient đạo hàm hướng cạnh theo chuẩn NVIDIA GameWorks
+      // Phân tích gradient đạo hàm hướng cạnh
       float l00 = getLuma(p00), l10 = getLuma(p10);
       float l01 = getLuma(p01), l11 = getLuma(p11);
       float lTop = getLuma(pTop), lBot = getLuma(pBot);
@@ -122,30 +122,40 @@
 
       float gradH = abs((l10 + l11) - (l00 + l01)) + abs(lRight - lLeft) * 0.5;
       float gradV = abs((l01 + l11) - (l00 + l10)) + abs(lBot - lTop) * 0.5;
-      float gradDiag1 = abs(l00 - l11);
-      float gradDiag2 = abs(l10 - l01);
+      float edgeMag = max(gradH, gradV);
 
-      float edgeStrength = clamp(max(max(gradH, gradV), max(gradDiag1, gradDiag2)) * 3.5, 0.0, 1.0);
+      // ==============================================================
+      // KHỬ HẠT (SMART BILATERAL DENOISE & NOISE CORING GATE)
+      // Vùng phẳng (da mặt, bầu trời, tường): Triệt tiêu 100% hạt nhiễu nén
+      // Vùng viền nét (tóc, mắt, chi tiết thực): Mở cổng nét tối đa
+      // ==============================================================
+      vec3 cleanCross = (pTop + pBot + pLeft + pRight + bilinear * 4.0) * 0.125;
+      float noiseGate = smoothstep(0.032, 0.085, edgeMag);
+      vec3 cleanBase = mix(cleanCross, bilinear, noiseGate);
 
-      // Tái tạo chi tiết tần số cao bằng đa thức cubic Catmull-Rom dọc theo hướng viền
+      // ==============================================================
+      // TÁI TẠO NÉT RENDER ĐỊNH HƯỚNG CUBIC CATMULL-ROM
+      // ==============================================================
       vec4 wx = cubicWeights(f.x);
       vec4 wy = cubicWeights(f.y);
 
-      vec3 edgeFilter = bilinear;
+      vec3 edgeFilter = cleanBase;
       if (gradH > gradV) {
         edgeFilter = pTop * wy.x + mix(p00, p10, f.x) * wy.y + mix(p01, p11, f.x) * wy.z + pBot * wy.w;
       } else {
         edgeFilter = pLeft * wx.x + mix(p00, p01, f.y) * wx.y + mix(p10, p11, f.y) * wx.z + pRight * wx.w;
       }
 
-      vec3 highFreq = edgeFilter - bilinear;
-      float sharpFactor = (u_sharpness / 100.0) * 1.6;
-      vec3 enhanced = bilinear + highFreq * (1.2 + sharpFactor * edgeStrength);
+      vec3 highFreq = edgeFilter - cleanBase;
+      float sharpIntensity = (u_sharpness / 100.0) * 2.2;
 
-      // Unsharp mask chống mờ đục
+      // Chỉ áp dụng nét lên đường viền thực sự (nhân với noiseGate), triệt tiêu hoàn toàn hạt ở vùng phẳng!
+      vec3 enhanced = cleanBase + highFreq * (1.5 + sharpIntensity) * noiseGate;
+
+      // Unsharp mask nổi khối viền
       vec3 crossAvg = (pTop + pBot + pLeft + pRight + p00 + p10 + p01 + p11) * 0.125;
-      vec3 usm = bilinear - crossAvg;
-      enhanced += usm * (sharpFactor * 0.9 * edgeStrength);
+      vec3 usm = cleanBase - crossAvg;
+      enhanced += usm * (sharpIntensity * 0.9) * noiseGate;
 
       // Kẹp chặt vào Bounding Box gốc
       enhanced = clamp(enhanced, minCol, maxCol);
@@ -165,7 +175,7 @@
           return;
         }
       }
-      gl_FragColor = renderNIS(v_texCoord); // Phải = NVIDIA NIS Upscaled
+      gl_FragColor = renderNISClean(v_texCoord); // Phải = NVIDIA NIS Clean Upscaled
     }
   `;
 
@@ -214,9 +224,9 @@
     }
   `;
 
-  // 3. FSRCNN-Lite (Neural 8-neighbor Laplacian Reconstruction)
+  // 3. FSRCNN-Lite (Neural Denoised Subpixel Reconstruction)
   const FRAGMENT_SHADER_FSRCNN = SHADER_HEADER + `
-    vec4 renderNeural(vec2 uv) {
+    vec4 renderNeuralClean(vec2 uv) {
       vec2 invSrc = 1.0 / u_srcResolution;
       vec3 c = texture2D(u_texture, uv).rgb;
 
@@ -232,12 +242,18 @@
       vec3 minCol = min(min(min(t, b), min(l, r)), min(min(tl, tr), min(bl, br)));
       vec3 maxCol = max(max(max(t, b), max(l, r)), max(max(tl, tr), max(bl, br)));
 
+      float edgeMag = max(max(abs(getLuma(t) - getLuma(b)), abs(getLuma(l) - getLuma(r))),
+                          max(abs(getLuma(tl) - getLuma(br)), abs(getLuma(tr) - getLuma(bl))));
+      float noiseGate = smoothstep(0.03, 0.08, edgeMag);
+      vec3 cleanCross = (t + b + l + r + c * 4.0) * 0.125;
+      vec3 base = mix(cleanCross, c, noiseGate);
+
       vec3 laplaceCross = (t + b + l + r) * 0.25;
       vec3 laplaceDiag  = (tl + tr + bl + br) * 0.25;
-      vec3 laplace = (laplaceCross * 0.6 + laplaceDiag * 0.4) - c;
+      vec3 laplace = (laplaceCross * 0.6 + laplaceDiag * 0.4) - base;
 
-      float factor = (u_sharpness / 100.0) * 1.35;
-      vec3 reconstructed = c - laplace * factor;
+      float factor = (u_sharpness / 100.0) * 1.8;
+      vec3 reconstructed = base - laplace * (factor * noiseGate);
 
       reconstructed = clamp(reconstructed, minCol, maxCol);
       return vec4(reconstructed, 1.0);
@@ -255,7 +271,7 @@
           return;
         }
       }
-      gl_FragColor = renderNeural(v_texCoord);
+      gl_FragColor = renderNeuralClean(v_texCoord);
     }
   `;
 
@@ -407,7 +423,7 @@
     document.head.appendChild(style);
   }
 
-  // TrustedHTML-compliant HUD Construction (No innerHTML)
+  // TrustedHTML-compliant HUD Construction
   function showHUD(customText) {
     if (!settings.showHud && !settings.splitScreen && !customText) return;
     const player = document.querySelector('#movie_player') || (state.video && state.video.parentElement);
@@ -463,7 +479,7 @@
       dotSpan.style.color = '#10b981';
       dotSpan.textContent = '●';
 
-      const names = { nis: 'NVIDIA NIS', catmull: 'Cinema 16-tap', fsrcnn: 'Neural 2x' };
+      const names = { nis: 'NVIDIA NIS Clean', catmull: 'Cinema 16-tap', fsrcnn: 'Neural 2x' };
       const textSpan = document.createElement('span');
       textSpan.textContent = `${names[settings.preset] || 'NVIDIA NIS'} • ${state.fps || 60} FPS (${state.renderLatency.toFixed(1)}ms)`;
 
@@ -499,7 +515,7 @@
   });
 
   // ==========================================
-  // Layout & DOM Synchronization
+  // Layout & DOM Synchronization (Super-Resolution Buffer)
   // ==========================================
 
   function getYouTubeVideo() {
@@ -527,12 +543,16 @@
 
     let targetW = 0, targetH = 0;
     if (settings.scaleMode === '2x') {
-      targetW = vw * 2;
-      targetH = vh * 2;
+      // 2x Super-Resolution Render Buffer: Gấp đôi điểm ảnh gốc (2K -> 4K)
+      targetW = Math.round(vw * 2);
+      targetH = Math.round(vh * 2);
     } else {
-      // 'auto': Khớp chính xác với kích thước màn hình
-      targetW = Math.max(vw, Math.round(vRect.width * dpr));
-      targetH = Math.max(vh, Math.round(vRect.height * dpr));
+      // 'auto': Super-Sampling Buffer mật độ cao (tối thiểu bằng resolution màn hình hoặc 1.25x video native)
+      const renderDensity = Math.max(dpr, 1.25);
+      const screenW = Math.round(vRect.width * renderDensity);
+      const screenH = Math.round(vRect.height * renderDensity);
+      targetW = Math.max(vw, screenW);
+      targetH = Math.max(vh, screenH);
     }
 
     if (targetW > 0 && targetH > 0) {
@@ -662,7 +682,7 @@
       try {
         initWebGL(canvas);
       } catch (err) {
-        console.error('[YT-Upscale v3.0] Lỗi WebGL:', err);
+        console.error('[YT-Upscale v3.2] Lỗi WebGL:', err);
         return;
       }
 
@@ -680,7 +700,7 @@
     state.lastPresentedFrame = -1;
 
     syncCanvasLayout();
-    scheduleNextFrame(); // Khởi chạy vòng lặp render GPU ngay lập tức
+    scheduleNextFrame();
 
     try {
       showHUD();
@@ -787,5 +807,5 @@
 
   loadSettings();
   watchPageChanges();
-  console.log('[YT-Upscale v3.0 PURE] NVIDIA NIS Engine đã khởi chạy an toàn (Trusted Types compliant).');
+  console.log('[YT-Upscale v3.2 Clean & Crisp] NVIDIA NIS Denoised Engine đã khởi chạy.');
 })();

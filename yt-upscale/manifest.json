@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "YT Upscale PURE - NVIDIA NIS & Neural Scaler",
-  "version": "3.0.0",
-  "description": "Nâng cấp độ phân giải video YouTube thời gian thực bằng NVIDIA Image Scaling (NIS) và Neural Convolution cho GeForce GTX/RTX, khử 100% viền trắng giả tạo.",
+  "name": "YT Upscale PURE - NVIDIA NIS Clean & Crisp",
+  "version": "3.2.0",
+  "description": "Nâng cấp độ phân giải video YouTube bằng NVIDIA Image Scaling (NIS) kết hợp bộ lọc song phương khử hạt (Smart Bilateral Denoise) cho card GeForce GTX/RTX.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

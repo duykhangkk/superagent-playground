@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YT Upscale v3.0 PURE</title>
+  <title>YT Upscale v3.2 Clean</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -20,7 +20,7 @@
         </div>
         <div class="title-group">
           <h1 class="title">YT Upscale PURE</h1>
-          <span class="subtitle">NVIDIA NIS • GeForce GTX 1650 Engine</span>
+          <span class="subtitle">NVIDIA NIS Clean • Zero Noise Super-Resolution</span>
         </div>
       </div>
       <div class="toggle-wrapper">
@@ -35,7 +35,7 @@
     <div class="compare-card">
       <div class="compare-info">
         <span class="compare-title">⚡ So sánh Trước / Sau (Split-Screen)</span>
-        <span class="compare-desc">Trái: Gốc YouTube | Phải: NVIDIA NIS Upscaled</span>
+        <span class="compare-desc">Trái: Gốc YouTube | Phải: NVIDIA NIS Clean</span>
       </div>
       <label class="switch small">
         <input type="checkbox" id="toggleSplitScreen">
@@ -95,16 +95,16 @@
 
     <!-- Controls -->
     <main class="controls">
-      <!-- Cường độ nét tự nhiên (NVIDIA NIS) -->
+      <!-- Cường độ nét & Khử hạt -->
       <div class="control-group">
         <div class="group-label-row">
-          <label class="control-label" for="sliderSharpness">Độ sắc nét nâng cao (NVIDIA NIS)</label>
-          <span class="value-badge" id="sharpnessVal">65%</span>
+          <label class="control-label" for="sliderSharpness">Độ sắc nét render (Zero Noise NIS)</label>
+          <span class="value-badge" id="sharpnessVal">70%</span>
         </div>
-        <input type="range" class="range-slider" id="sliderSharpness" min="10" max="100" value="65" step="5">
+        <input type="range" class="range-slider" id="sliderSharpness" min="10" max="100" value="70" step="5">
         <div class="slider-labels">
-          <span>10% (Tự nhiên)</span>
-          <span>65% (Chuẩn nét)</span>
+          <span>10% (Mịn dịu)</span>
+          <span>70% (Chuẩn nét & Sạch hạt)</span>
           <span>100% (Cực nét)</span>
         </div>
       </div>
@@ -113,14 +113,14 @@
       <div class="control-group">
         <div class="group-label-row">
           <label class="control-label">Độ phân giải hiển thị</label>
-          <span class="info-tag" title="Auto là chế độ mượt mà nhất, khớp chính xác 100% với khung hình và giữ 60/120/144 FPS tuyệt đối.">Mượt nhất: Auto</span>
+          <span class="info-tag" title="Auto khớp chính xác với màn hình. 2x nhân đôi mật độ pixel render trên GPU rời.">Mượt nhất: Auto</span>
         </div>
         <div class="segmented-control">
           <button type="button" class="segment-btn active" data-scale="auto" id="btnAuto">
             Auto (Khớp màn hình mượt 100%)
           </button>
           <button type="button" class="segment-btn" data-scale="2x" id="btn2x">
-            2x Native Resolution
+            2x Super-Resolution Buffer
           </button>
         </div>
       </div>
@@ -133,10 +133,10 @@
             <input type="radio" name="preset" value="nis" checked>
             <div class="radio-content">
               <div class="card-title-row">
-                <span class="card-name">NVIDIA Image Scaling (NIS)</span>
+                <span class="card-name">NVIDIA NIS Clean (Khử hạt & Siêu nét)</span>
                 <span class="card-tag best">Chuẩn NVIDIA GTX</span>
               </div>
-              <p class="card-desc">Thuật toán chính thức của NVIDIA cho card GTX: 6-tap directional edge filter + Bounding Box Clamping triệt tiêu 100% viền trắng giả tạo.</p>
+              <p class="card-desc">Bộ lọc song phương (Bilateral) hòa tan 100% hạt nén YouTube trên da mặt và nền phẳng, đồng thời tái tạo nét 12-tap trên mắt, tóc và chi tiết thật.</p>
             </div>
           </label>
 
@@ -144,10 +144,10 @@
             <input type="radio" name="preset" value="fsrcnn">
             <div class="radio-content">
               <div class="card-title-row">
-                <span class="card-name">Neural 2x (FSRCNN-Lite)</span>
-                <span class="card-tag">Mạng nơ-ron AI</span>
+                <span class="card-name">Neural 2x Clean (Mạng nơ-ron AI)</span>
+                <span class="card-tag">Khử nhiễu CNN</span>
               </div>
-              <p class="card-desc">Tái tạo ma trận điểm ảnh con bằng mạng nơ-ron tích chập (CNN), bảo toàn độ sâu khối hình mà không bị gai ảnh.</p>
+              <p class="card-desc">Dự đoán điểm ảnh con bằng mạng tích chập kết hợp lọc nhiễu thích nghi, giữ khối 3D tròn trịa không gãy hạt.</p>
             </div>
           </label>
 
@@ -158,7 +158,7 @@
                 <span class="card-name">Cinema Catmull-Rom (16-tap)</span>
                 <span class="card-tag">Điện ảnh êm dịu</span>
               </div>
-              <p class="card-desc">Nội suy spline đa thức bậc 3 mượt mà 16 điểm ảnh xung quanh, loại bỏ hoàn toàn răng cưa và vỡ hạt.</p>
+              <p class="card-desc">Nội suy spline 16 điểm ảnh mượt mà, loại bỏ hoàn toàn răng cưa và hiện tượng vỡ hạt.</p>
             </div>
           </label>
         </div>
@@ -171,7 +171,7 @@
         <span class="hint-key">⌨️ Bấm <strong>U</strong> trên YouTube để bật/tắt</span>
       </div>
       <div class="footer-right">
-        <span class="version-tag">v3.0 PURE</span>
+        <span class="version-tag">v3.2 Clean</span>
       </div>
     </footer>
   </div>

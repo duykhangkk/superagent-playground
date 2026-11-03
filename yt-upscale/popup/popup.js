@@ -8,7 +8,7 @@
     enabled: true,
     preset: 'nis',          // 'nis' | 'fsrcnn' | 'catmull'
     scaleMode: 'auto',      // 'auto' | '2x'
-    sharpness: 65,          // 10 - 100%
+    sharpness: 70,          // 10 - 100%
     splitScreen: false,
     splitPos: 0.5,
     showHud: true

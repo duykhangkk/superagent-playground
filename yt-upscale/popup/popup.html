@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YT Upscale v3.2 Clean</title>
+  <title>YT Upscale Pro v4.0 Ultimate</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -19,8 +19,8 @@
           </svg>
         </div>
         <div class="title-group">
-          <h1 class="title">YT Upscale PURE</h1>
-          <span class="subtitle">NVIDIA NIS Clean • Zero Noise Super-Resolution</span>
+          <h1 class="title">YT Upscale Pro</h1>
+          <span class="subtitle">NVIDIA NIS Pro • Zero-Stutter 60+ FPS</span>
         </div>
       </div>
       <div class="toggle-wrapper">
@@ -35,7 +35,7 @@
     <div class="compare-card">
       <div class="compare-info">
         <span class="compare-title">⚡ So sánh Trước / Sau (Split-Screen)</span>
-        <span class="compare-desc">Trái: Gốc YouTube | Phải: NVIDIA NIS Clean</span>
+        <span class="compare-desc">Trái: Gốc YouTube | Phải: NVIDIA NIS Pro</span>
       </div>
       <label class="switch small">
         <input type="checkbox" id="toggleSplitScreen">
@@ -50,7 +50,7 @@
           <span class="status-dot active" id="statusDot"></span>
           <span class="status-text" id="statusText">Đang Upscale GPU</span>
         </div>
-        <div class="fps-pill" id="fpsBadge">60 FPS • 1.5ms</div>
+        <div class="fps-pill" id="fpsBadge">60 FPS • 1.1ms</div>
       </div>
 
       <div class="metrics-grid">
@@ -78,7 +78,7 @@
         </div>
         <div class="telem-item">
           <span class="telem-label">Tải độ trễ GPU:</span>
-          <span class="telem-val cyan" id="latencyVal">~1.5 ms</span>
+          <span class="telem-val cyan" id="latencyVal">~1.1 ms</span>
         </div>
       </div>
 
@@ -133,10 +133,10 @@
             <input type="radio" name="preset" value="nis" checked>
             <div class="radio-content">
               <div class="card-title-row">
-                <span class="card-name">NVIDIA NIS Clean (Khử hạt & Siêu nét)</span>
-                <span class="card-tag best">Chuẩn NVIDIA GTX</span>
+                <span class="card-name">NVIDIA NIS Pro (Anti-Grain & Sharp)</span>
+                <span class="card-tag best">Khuyên dùng</span>
               </div>
-              <p class="card-desc">Bộ lọc song phương (Bilateral) hòa tan 100% hạt nén YouTube trên da mặt và nền phẳng, đồng thời tái tạo nét 12-tap trên mắt, tóc và chi tiết thật.</p>
+              <p class="card-desc">Nội suy Catmull-Rom 8-tap theo tiếp tuyến viền, tích hợp bộ lọc Bilateral triệt tiêu hoàn toàn hạt nén YouTube trên da mặt và nền phẳng.</p>
             </div>
           </label>
 
@@ -144,10 +144,10 @@
             <input type="radio" name="preset" value="fsrcnn">
             <div class="radio-content">
               <div class="card-title-row">
-                <span class="card-name">Neural 2x Clean (Mạng nơ-ron AI)</span>
-                <span class="card-tag">Khử nhiễu CNN</span>
+                <span class="card-name">Neural-Edge CNN (Subpixel Convolution)</span>
+                <span class="card-tag">Mạng nơ-ron AI</span>
               </div>
-              <p class="card-desc">Dự đoán điểm ảnh con bằng mạng tích chập kết hợp lọc nhiễu thích nghi, giữ khối 3D tròn trịa không gãy hạt.</p>
+              <p class="card-desc">Tái tạo điểm ảnh con bằng mạng tích chập Laplacian, làm nét các đường viền phức tạp của anime, game và đồ họa 3D.</p>
             </div>
           </label>
 
@@ -155,10 +155,10 @@
             <input type="radio" name="preset" value="catmull">
             <div class="radio-content">
               <div class="card-title-row">
-                <span class="card-name">Cinema Catmull-Rom (16-tap)</span>
-                <span class="card-tag">Điện ảnh êm dịu</span>
+                <span class="card-name">Cinema Catmull-Rom (16-tap Spline)</span>
+                <span class="card-tag">Điện ảnh mượt mà</span>
               </div>
-              <p class="card-desc">Nội suy spline 16 điểm ảnh mượt mà, loại bỏ hoàn toàn răng cưa và hiện tượng vỡ hạt.</p>
+              <p class="card-desc">Nội suy spline đa thức bậc 3 chuẩn điện ảnh, loại bỏ hoàn toàn răng cưa và hiện tượng vỡ hạt.</p>
             </div>
           </label>
         </div>
@@ -171,7 +171,7 @@
         <span class="hint-key">⌨️ Bấm <strong>U</strong> trên YouTube để bật/tắt</span>
       </div>
       <div class="footer-right">
-        <span class="version-tag">v3.3 Fluid</span>
+        <span class="version-tag">v4.0 Ultimate</span>
       </div>
     </footer>
   </div>

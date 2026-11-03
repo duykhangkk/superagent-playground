@@ -400,6 +400,7 @@ input:checked + .slider:before {
 /* Segmented Control */
 .segmented-control {
   display: grid;
+  grid-template-columns: 1fr 1fr;
   background-color: #e2e8f0;
   padding: 3px;
   border-radius: var(--radius-md);

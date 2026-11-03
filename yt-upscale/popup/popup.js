@@ -1,14 +1,14 @@
 /**
- * YT Upscale - Popup Logic v2.1 FLUID
+ * YT Upscale - Popup Logic v3.0 PURE (NVIDIA NIS & Neural Scaler)
  */
 (() => {
   'use strict';
 
   const DEFAULT_SETTINGS = {
     enabled: true,
-    preset: 'anime4k',
-    scaleMode: 'auto',
-    strength: 1.8,
+    preset: 'nis',          // 'nis' | 'fsrcnn' | 'catmull'
+    scaleMode: 'auto',      // 'auto' | '2x'
+    sharpness: 35,          // 0 - 60%
     splitScreen: false,
     splitPos: 0.5,
     showHud: true
@@ -29,17 +29,15 @@
     latencyVal: document.getElementById('latencyVal'),
     drmWarning: document.getElementById('drmWarning'),
     drmText: document.getElementById('drmText'),
-    sliderStrength: document.getElementById('sliderStrength'),
-    strengthVal: document.getElementById('strengthVal'),
+    sliderSharpness: document.getElementById('sliderSharpness'),
+    sharpnessVal: document.getElementById('sharpnessVal'),
     btnAuto: document.getElementById('btnAuto'),
     btn2x: document.getElementById('btn2x'),
-    btn4k: document.getElementById('btn4k'),
     presetRadios: document.querySelectorAll('input[name="preset"]'),
     radioCards: {
-      anime4k: document.getElementById('labelAnime4k'),
-      cinema4k: document.getElementById('labelCinema'),
-      esports: document.getElementById('labelEsports'),
-      fsr: document.getElementById('labelFSR')
+      nis: document.getElementById('labelNis'),
+      fsrcnn: document.getElementById('labelFsrcnn'),
+      catmull: document.getElementById('labelCatmull')
     }
   };
 
@@ -47,9 +45,8 @@
     el.toggleEnabled.checked = settings.enabled;
     el.toggleSplitScreen.checked = settings.splitScreen;
     
-    const pct = Math.round(settings.strength * 100);
-    el.sliderStrength.value = pct;
-    el.strengthVal.textContent = `${pct}%`;
+    el.sliderSharpness.value = settings.sharpness;
+    el.sharpnessVal.textContent = `${settings.sharpness}%`;
 
     el.presetRadios.forEach(r => {
       r.checked = (r.value === settings.preset);
@@ -60,10 +57,14 @@
       }
     });
 
-    [el.btnAuto, el.btn2x, el.btn4k].forEach(btn => btn.classList.remove('active'));
-    if (settings.scaleMode === '4k') el.btn4k.classList.add('active');
-    else if (settings.scaleMode === '2x') el.btn2x.classList.add('active');
-    else el.btnAuto.classList.add('active');
+    [el.btnAuto, el.btn2x].forEach(btn => {
+      if (btn) btn.classList.remove('active');
+    });
+    if (settings.scaleMode === '2x' && el.btn2x) {
+      el.btn2x.classList.add('active');
+    } else if (el.btnAuto) {
+      el.btnAuto.classList.add('active');
+    }
 
     if (!settings.enabled) {
       el.statusDot.classList.remove('active');
@@ -116,7 +117,7 @@
           el.drmText.textContent = response.taintedReason || 'Video DRM, không thể capture.';
         } else if (response.active) {
           el.statusDot.classList.add('active');
-          el.statusText.textContent = settings.splitScreen ? 'Đang so sánh Trái / Phải' : 'Đang Upscale GPU';
+          el.statusText.textContent = settings.splitScreen ? 'Đang so sánh Trái / Phải' : 'NVIDIA NIS GPU Đang chạy';
           el.drmWarning.style.display = 'none';
         } else {
           el.statusDot.classList.remove('active');
@@ -125,7 +126,7 @@
         }
 
         const fps = response.fps || 60;
-        const latency = response.renderLatency || '1.8';
+        const latency = response.renderLatency || '1.5';
         el.nativeRes.textContent = response.nativeRes || '---';
         el.outputRes.textContent = response.outputRes || '---';
         el.fpsBadge.textContent = `${fps} FPS • ${latency}ms`;
@@ -151,34 +152,45 @@
       saveSettings({ splitScreen: el.toggleSplitScreen.checked });
     });
 
-    el.sliderStrength.addEventListener('input', () => {
-      el.strengthVal.textContent = `${el.sliderStrength.value}%`;
+    el.sliderSharpness.addEventListener('input', () => {
+      el.sharpnessVal.textContent = `${el.sliderSharpness.value}%`;
     });
 
-    el.sliderStrength.addEventListener('change', () => {
-      saveSettings({ strength: Number(el.sliderStrength.value) / 100.0 });
+    el.sliderSharpness.addEventListener('change', () => {
+      saveSettings({ sharpness: Number(el.sliderSharpness.value) });
     });
+
+    if (el.btnAuto) {
+      el.btnAuto.addEventListener('click', () => {
+        saveSettings({ scaleMode: 'auto' });
+      });
+    }
+
+    if (el.btn2x) {
+      el.btn2x.addEventListener('click', () => {
+        saveSettings({ scaleMode: '2x' });
+      });
+    }
 
     el.presetRadios.forEach(radio => {
       radio.addEventListener('change', () => {
-        if (radio.checked) saveSettings({ preset: radio.value });
+        if (radio.checked) {
+          saveSettings({ preset: radio.value });
+        }
       });
     });
-
-    el.btnAuto.addEventListener('click', () => saveSettings({ scaleMode: 'auto' }));
-    el.btn2x.addEventListener('click', () => saveSettings({ scaleMode: '2x' }));
-    el.btn4k.addEventListener('click', () => saveSettings({ scaleMode: '4k' }));
   }
 
   async function init() {
-    bindEvents();
     try {
-      const stored = await chrome.storage.sync.get(DEFAULT_SETTINGS);
-      settings = { ...DEFAULT_SETTINGS, ...stored };
-    } catch (e) {
+      const data = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+      settings = { ...DEFAULT_SETTINGS, ...data };
+    } catch (err) {
       settings = { ...DEFAULT_SETTINGS };
     }
+
     updateUI();
+    bindEvents();
     queryActiveTabStatus();
 
     pollInterval = setInterval(queryActiveTabStatus, 1000);

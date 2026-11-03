@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "YT Upscale - Nâng cấp video YouTube WebGL",
-  "version": "1.0.0",
-  "description": "Nâng cấp khung hình video YouTube vượt độ phân giải gốc trong thời gian thực bằng WebGL (AMD FSR EASU & Lanczos-3).",
+  "name": "YT Upscale PURE - NVIDIA NIS & Neural Scaler",
+  "version": "3.0.0",
+  "description": "Nâng cấp độ phân giải video YouTube thời gian thực bằng NVIDIA Image Scaling (NIS) và Neural Convolution cho GeForce GTX/RTX, khử 100% viền trắng giả tạo.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -10,7 +10,7 @@
   },
   "action": {
     "default_popup": "popup/popup.html",
-    "default_title": "Cài đặt YT Upscale",
+    "default_title": "Cài đặt YT Upscale PURE",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

@@ -1,22 +1,22 @@
 /**
- * YT Upscale - Popup Logic v1.1.0
+ * YT Upscale - Popup Logic v2.0 ULTRA
  */
 (() => {
   'use strict';
 
   const DEFAULT_SETTINGS = {
     enabled: true,
-    algorithm: 'easu',
-    scaleMode: '2x',
-    sharpness: 75,
+    preset: 'anime4k',
+    scaleMode: '4k',
+    strength: 1.8,
     splitScreen: false,
+    splitPos: 0.5,
     showHud: true
   };
 
   let settings = { ...DEFAULT_SETTINGS };
   let pollInterval = null;
 
-  // DOM Elements
   const el = {
     toggleEnabled: document.getElementById('toggleEnabled'),
     toggleSplitScreen: document.getElementById('toggleSplitScreen'),
@@ -27,44 +27,47 @@
     outputRes: document.getElementById('outputRes'),
     drmWarning: document.getElementById('drmWarning'),
     drmText: document.getElementById('drmText'),
-    sliderSharpness: document.getElementById('sliderSharpness'),
-    sharpnessVal: document.getElementById('sharpnessVal'),
+    sliderStrength: document.getElementById('sliderStrength'),
+    strengthVal: document.getElementById('strengthVal'),
+    btn4k: document.getElementById('btn4k'),
     btn2x: document.getElementById('btn2x'),
-    btn15x: document.getElementById('btn15x'),
-    btnFit: document.getElementById('btnFit'),
-    radioEASU: document.querySelector('input[value="easu"]'),
-    radioLanczos: document.querySelector('input[value="lanczos"]'),
-    labelEASU: document.getElementById('labelEASU'),
-    labelLanczos: document.getElementById('labelLanczos'),
-    saveIndicator: document.getElementById('saveIndicator')
+    btnAuto: document.getElementById('btnAuto'),
+    presetRadios: document.querySelectorAll('input[name="preset"]'),
+    radioCards: {
+      anime4k: document.getElementById('labelAnime4k'),
+      cinema4k: document.getElementById('labelCinema'),
+      esports: document.getElementById('labelEsports'),
+      fsr: document.getElementById('labelFSR')
+    }
   };
 
   function updateUI() {
     el.toggleEnabled.checked = settings.enabled;
     el.toggleSplitScreen.checked = settings.splitScreen;
-    el.sliderSharpness.value = settings.sharpness;
-    el.sharpnessVal.textContent = `${settings.sharpness}%`;
+    
+    const pct = Math.round(settings.strength * 100);
+    el.sliderStrength.value = pct;
+    el.strengthVal.textContent = `${pct}%`;
 
-    // Algorithm
-    if (settings.algorithm === 'easu') {
-      el.radioEASU.checked = true;
-      el.labelEASU.classList.add('active');
-      el.labelLanczos.classList.remove('active');
-    } else {
-      el.radioLanczos.checked = true;
-      el.labelLanczos.classList.add('active');
-      el.labelEASU.classList.remove('active');
-    }
+    // Presets
+    el.presetRadios.forEach(r => {
+      r.checked = (r.value === settings.preset);
+      const card = el.radioCards[r.value];
+      if (card) {
+        if (r.checked) card.classList.add('active');
+        else card.classList.remove('active');
+      }
+    });
 
-    // Scale
-    [el.btn2x, el.btn15x, el.btnFit].forEach(btn => btn.classList.remove('active'));
-    if (settings.scaleMode === '2x') el.btn2x.classList.add('active');
-    else if (settings.scaleMode === '1.5x') el.btn15x.classList.add('active');
-    else el.btnFit.classList.add('active');
+    // Scale buttons
+    [el.btn4k, el.btn2x, el.btnAuto].forEach(btn => btn.classList.remove('active'));
+    if (settings.scaleMode === '4k') el.btn4k.classList.add('active');
+    else if (settings.scaleMode === '2x') el.btn2x.classList.add('active');
+    else el.btnAuto.classList.add('active');
 
     if (!settings.enabled) {
       el.statusDot.classList.remove('active');
-      el.statusText.textContent = 'Đã tắt extension';
+      el.statusText.textContent = 'Đã tắt extension (Bấm U để bật)';
       el.fpsBadge.textContent = '0 FPS';
     }
   }
@@ -74,21 +77,10 @@
     updateUI();
     try {
       await chrome.storage.sync.set(settings);
-      showSavedFlash();
     } catch (err) {
-      console.error('Không thể lưu cài đặt:', err);
+      console.error('Không thể lưu:', err);
     }
     queryActiveTabStatus();
-  }
-
-  let saveTimer = null;
-  function showSavedFlash() {
-    el.saveIndicator.textContent = '✓ Đã đồng bộ';
-    el.saveIndicator.style.opacity = '1';
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      el.saveIndicator.style.opacity = '0.7';
-    }, 1200);
   }
 
   async function queryActiveTabStatus() {
@@ -107,7 +99,7 @@
       chrome.tabs.sendMessage(tab.id, { type: 'yt-upscale:get-status' }, (response) => {
         if (chrome.runtime.lastError || !response || !response.ok) {
           el.statusDot.classList.remove('active');
-          el.statusText.textContent = 'Đang đợi video… (F5 tab)';
+          el.statusText.textContent = 'Đang đợi video… (F5 tab nếu vừa cài)';
           el.fpsBadge.textContent = '0 FPS';
           el.drmWarning.style.display = 'none';
           return;
@@ -120,7 +112,7 @@
           el.drmText.textContent = response.taintedReason || 'Video DRM, không thể capture.';
         } else if (response.active) {
           el.statusDot.classList.add('active');
-          el.statusText.textContent = settings.splitScreen ? 'Đang so sánh Trái / Phải' : 'Đang Upscale WebGL';
+          el.statusText.textContent = settings.splitScreen ? 'Đang so sánh Trái / Phải' : 'Đang Upscale GPU 4K';
           el.drmWarning.style.display = 'none';
         } else {
           el.statusDot.classList.remove('active');
@@ -129,7 +121,7 @@
         }
 
         el.nativeRes.textContent = response.nativeRes || '---';
-        el.outputRes.textContent = response.outputRes || '---';
+        el.outputRes.textContent = response.outputRes || '3840×2160 (4K)';
         el.fpsBadge.textContent = `${response.fps || 0} FPS`;
       });
     } catch (e) {}
@@ -144,25 +136,23 @@
       saveSettings({ splitScreen: el.toggleSplitScreen.checked });
     });
 
-    el.sliderSharpness.addEventListener('input', () => {
-      el.sharpnessVal.textContent = `${el.sliderSharpness.value}%`;
+    el.sliderStrength.addEventListener('input', () => {
+      el.strengthVal.textContent = `${el.sliderStrength.value}%`;
     });
 
-    el.sliderSharpness.addEventListener('change', () => {
-      saveSettings({ sharpness: Number(el.sliderSharpness.value) });
+    el.sliderStrength.addEventListener('change', () => {
+      saveSettings({ strength: Number(el.sliderStrength.value) / 100.0 });
     });
 
-    el.radioEASU.addEventListener('change', () => {
-      if (el.radioEASU.checked) saveSettings({ algorithm: 'easu' });
+    el.presetRadios.forEach(radio => {
+      radio.addEventListener('change', () => {
+        if (radio.checked) saveSettings({ preset: radio.value });
+      });
     });
 
-    el.radioLanczos.addEventListener('change', () => {
-      if (el.radioLanczos.checked) saveSettings({ algorithm: 'lanczos' });
-    });
-
+    el.btn4k.addEventListener('click', () => saveSettings({ scaleMode: '4k' }));
     el.btn2x.addEventListener('click', () => saveSettings({ scaleMode: '2x' }));
-    el.btn15x.addEventListener('click', () => saveSettings({ scaleMode: '1.5x' }));
-    el.btnFit.addEventListener('click', () => saveSettings({ scaleMode: 'fit' }));
+    el.btnAuto.addEventListener('click', () => saveSettings({ scaleMode: 'auto' }));
   }
 
   async function init() {

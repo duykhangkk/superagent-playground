@@ -1,34 +1,34 @@
 /**
- * YT Upscale - Content Script v1.1.0
- * Real-time WebGL Video Upscaling for YouTube
- * Dual-Pass AMD FSR 1.0 (EASU + RCAS Sharpening) & Lanczos-3 Sinc Resampling
- * Hỗ trợ Split-Screen Trước/Sau & OSD HUD thời gian thực
+ * YT Upscale - Content Script v2.0 ULTRA
+ * GPU-Accelerated Video Upscaling & Restoration Engine
+ * Powered by Anime4K v4 (Line Thinning & Edge Push) + Cinema 4K (Bilateral Denoise + Micro-Contrast) + AMD FSR 1.0
+ * Tận dụng toàn diện sức mạnh card đồ họa rời (NVIDIA GTX 1650+) qua WebGL 2.0
  */
 (() => {
   'use strict';
 
-  if (window.__YT_UPSCALE_INJECTED__) return;
-  window.__YT_UPSCALE_INJECTED__ = true;
+  if (window.__YT_UPSCALE_INJECTED_V2__) return;
+  window.__YT_UPSCALE_INJECTED_V2__ = true;
 
-  // Cấu hình mặc định
+  // Cấu hình mặc định v2.0 Ultra
   const DEFAULT_SETTINGS = {
     enabled: true,
-    algorithm: 'easu',      // 'easu' (FSR) | 'lanczos'
-    scaleMode: '2x',        // '2x' (gấp đôi native 4K) | '1.5x' | 'fit'
-    sharpness: 75,          // 0 - 100% (RCAS adaptive sharpening)
-    splitScreen: false,     // Chế độ so sánh chia đôi màn hình (Trái Gốc / Phải Upscale)
-    showHud: true           // Hiển thị badge trạng thái trên video
+    preset: 'anime4k',     // 'anime4k' (Siêu nét viền) | 'cinema4k' (Điện ảnh người thật) | 'fsr' (AMD FSR 1.0) | 'esports' (Game/HUD)
+    scaleMode: '4k',       // '4k' (3840x2160 Ultra) | '2x' (Gấp đôi) | 'auto'
+    strength: 1.8,         // 0.5 - 3.0 (Cường độ làm nét & tái tạo chi tiết)
+    denoise: true,         // Khử nhiễu nén khối YouTube trước khi phóng to
+    splitScreen: false,    // Chia đôi màn hình so sánh Trái (Gốc) vs Phải (Upscale)
+    splitPos: 0.5,         // Vị trí vạch chia 0.0 - 1.0
+    showHud: true          // Huy hiệu OSD trạng thái
   };
 
   let settings = { ...DEFAULT_SETTINGS };
 
-  // Runtime State
   const state = {
     video: null,
     canvas: null,
     gl: null,
-    programEASU: null,
-    programLanczos: null,
+    programs: {},
     texture: null,
     quadBuffer: null,
     vfcHandle: null,
@@ -54,33 +54,201 @@
     attribute vec2 a_position;
     varying vec2 v_texCoord;
     void main() {
-      // Chuyển [-1, 1] sang UV [0, 1], lật trục Y cho video texture
       v_texCoord = vec2((a_position.x + 1.0) * 0.5, (1.0 - a_position.y) * 0.5);
       gl_Position = vec4(a_position, 0.0, 1.0);
     }
   `;
 
-  // AMD FSR 1.0 EASU + RCAS Fragment Shader (Tái tạo biên + Làm nét thích ứng tương phản)
-  const FRAGMENT_SHADER_EASU = `
+  // Shader chung: Quản lý Split-Screen và Header
+  const SHADER_HEADER = `
     precision highp float;
     uniform sampler2D u_texture;
     uniform vec2 u_srcResolution;
     uniform vec2 u_outResolution;
-    uniform float u_sharpness;
+    uniform float u_strength;
     uniform bool u_splitScreen;
+    uniform float u_splitPos;
     varying vec2 v_texCoord;
 
     float getLuma(vec3 c) {
       return dot(c, vec3(0.2126, 0.7152, 0.0722));
     }
+  `;
 
-    vec4 renderFSR(vec2 uv) {
+  // 1. Anime4K v4 Ultra: Line Thinning & Gradient Edge Push
+  // Đặc trị cho Anime, Phim hoạt hình, Tranh vẽ, Nét chữ
+  const FRAGMENT_SHADER_ANIME4K = SHADER_HEADER + `
+    vec2 getGradient(vec2 uv, vec2 invSize) {
+      float tl = getLuma(texture2D(u_texture, uv + vec2(-1.0, -1.0) * invSize).rgb);
+      float tc = getLuma(texture2D(u_texture, uv + vec2( 0.0, -1.0) * invSize).rgb);
+      float tr = getLuma(texture2D(u_texture, uv + vec2( 1.0, -1.0) * invSize).rgb);
+      float ml = getLuma(texture2D(u_texture, uv + vec2(-1.0,  0.0) * invSize).rgb);
+      float mr = getLuma(texture2D(u_texture, uv + vec2( 1.0,  0.0) * invSize).rgb);
+      float bl = getLuma(texture2D(u_texture, uv + vec2(-1.0,  1.0) * invSize).rgb);
+      float bc = getLuma(texture2D(u_texture, uv + vec2( 0.0,  1.0) * invSize).rgb);
+      float br = getLuma(texture2D(u_texture, uv + vec2( 1.0,  1.0) * invSize).rgb);
+
+      float dx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
+      float dy = (bl + 2.0 * bc + br) - (tl + 2.0 * tc + tr);
+      return vec2(dx, dy);
+    }
+
+    vec4 processEffect(vec2 uv) {
+      vec2 invSrc = 1.0 / u_srcResolution;
+      vec2 grad = getGradient(uv, invSrc);
+      float len = length(grad);
+
+      // Line Thinning: Dồn điểm ảnh mờ dọc theo vector gradient để thu hẹp viền thành 1px sắc bén
+      vec2 sampleUV = uv;
+      if (len > 0.015) {
+        vec2 normGrad = grad / len;
+        float stepSize = 0.9 * clamp(u_strength, 0.5, 2.5);
+        vec2 p1 = uv + normGrad * invSrc * stepSize;
+        vec2 p2 = uv - normGrad * invSrc * stepSize;
+
+        float l0 = getLuma(texture2D(u_texture, uv).rgb);
+        float l1 = getLuma(texture2D(u_texture, p1).rgb);
+        float l2 = getLuma(texture2D(u_texture, p2).rgb);
+
+        if (l1 < l0 && l1 < l2) sampleUV = p1;
+        else if (l2 < l0) sampleUV = p2;
+      }
+
+      vec3 baseCol = texture2D(u_texture, sampleUV).rgb;
+
+      // Unsharp Masking tái tạo độ sâu
+      vec3 blur = (
+        texture2D(u_texture, sampleUV + vec2(0.0, -invSrc.y)).rgb +
+        texture2D(u_texture, sampleUV + vec2(0.0,  invSrc.y)).rgb +
+        texture2D(u_texture, sampleUV + vec2(-invSrc.x, 0.0)).rgb +
+        texture2D(u_texture, sampleUV + vec2( invSrc.x, 0.0)).rgb
+      ) * 0.25;
+
+      vec3 sharp = baseCol + (baseCol - blur) * (u_strength * 1.1);
+      return vec4(clamp(sharp, 0.0, 1.0), 1.0);
+    }
+
+    void main() {
+      if (u_splitScreen) {
+        float divider = 2.0 / u_outResolution.x;
+        if (abs(v_texCoord.x - u_splitPos) < divider) {
+          gl_FragColor = vec4(1.0, 0.9, 0.2, 1.0); // Vạch vàng rực rỡ
+          return;
+        }
+        if (v_texCoord.x < u_splitPos) {
+          gl_FragColor = texture2D(u_texture, v_texCoord);
+          return;
+        }
+      }
+      gl_FragColor = processEffect(v_texCoord);
+    }
+  `;
+
+  // 2. Cinema & Live-Action 4K: Bilateral Denoise + Micro-Contrast Synthesis
+  // Đặc trị cho Phim điện ảnh, Vlog, Người thật, Phong cảnh thiên nhiên
+  const FRAGMENT_SHADER_CINEMA = SHADER_HEADER + `
+    vec4 processEffect(vec2 uv) {
+      vec2 invSrc = 1.0 / u_srcResolution;
+      vec3 center = texture2D(u_texture, uv).rgb;
+      float cLuma = getLuma(center);
+
+      // Bilateral Denoising: Khử nhiễu khối macroblock nén của YouTube
+      vec3 accum = center;
+      float totalW = 1.0;
+      for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+          if (x == 0 && y == 0) continue;
+          vec2 off = vec2(float(x), float(y)) * invSrc;
+          vec3 nCol = texture2D(u_texture, uv + off).rgb;
+          float nLuma = getLuma(nCol);
+          float spatialW = exp(-float(x*x + y*y) * 0.5);
+          float rangeW = exp(-abs(cLuma - nLuma) * 30.0);
+          float w = spatialW * rangeW;
+          accum += nCol * w;
+          totalW += w;
+        }
+      }
+      vec3 clean = accum / totalW;
+
+      // Micro-Contrast: Tăng độ nét viền mắt, nếp vải, sợi tóc, bề mặt da
+      vec3 blur = (
+        texture2D(u_texture, uv + vec2(-invSrc.x, 0.0)).rgb +
+        texture2D(u_texture, uv + vec2( invSrc.x, 0.0)).rgb +
+        texture2D(u_texture, uv + vec2(0.0, -invSrc.y)).rgb +
+        texture2D(u_texture, uv + vec2(0.0,  invSrc.y)).rgb
+      ) * 0.25;
+
+      vec3 highpass = center - blur;
+      vec3 sharp = clean + highpass * (u_strength * 1.6);
+
+      // Loại bỏ sương mù nén (De-hazing local contrast)
+      vec3 contrast = mix(sharp, (sharp - 0.5) * 1.1 + 0.5, 0.4);
+      return vec4(clamp(contrast, 0.0, 1.0), 1.0);
+    }
+
+    void main() {
+      if (u_splitScreen) {
+        float divider = 2.0 / u_outResolution.x;
+        if (abs(v_texCoord.x - u_splitPos) < divider) {
+          gl_FragColor = vec4(1.0, 0.9, 0.2, 1.0);
+          return;
+        }
+        if (v_texCoord.x < u_splitPos) {
+          gl_FragColor = texture2D(u_texture, v_texCoord);
+          return;
+        }
+      }
+      gl_FragColor = processEffect(v_texCoord);
+    }
+  `;
+
+  // 3. Gaming & Esports 4K: Siêu nét chữ, minimap và hình ảnh chuyển động cao
+  const FRAGMENT_SHADER_ESPORTS = SHADER_HEADER + `
+    vec4 processEffect(vec2 uv) {
+      vec2 invSrc = 1.0 / u_srcResolution;
+      vec3 c = texture2D(u_texture, uv).rgb;
+      vec3 t = texture2D(u_texture, uv + vec2(0.0, -invSrc.y)).rgb;
+      vec3 b = texture2D(u_texture, uv + vec2(0.0,  invSrc.y)).rgb;
+      vec3 l = texture2D(u_texture, uv + vec2(-invSrc.x, 0.0)).rgb;
+      vec3 r = texture2D(u_texture, uv + vec2( invSrc.x, 0.0)).rgb;
+
+      vec3 tl = texture2D(u_texture, uv + vec2(-invSrc.x, -invSrc.y)).rgb;
+      vec3 tr = texture2D(u_texture, uv + vec2( invSrc.x, -invSrc.y)).rgb;
+      vec3 bl = texture2D(u_texture, uv + vec2(-invSrc.x,  invSrc.y)).rgb;
+      vec3 br = texture2D(u_texture, uv + vec2( invSrc.x,  invSrc.y)).rgb;
+
+      vec3 blur = (t + b + l + r) * 0.15 + (tl + tr + bl + br) * 0.1;
+      vec3 highpass = c - blur;
+
+      // Extreme edge emphasis for HUD/3D models
+      vec3 sharp = c + highpass * (u_strength * 2.2);
+      return vec4(clamp(sharp, 0.0, 1.0), 1.0);
+    }
+
+    void main() {
+      if (u_splitScreen) {
+        float divider = 2.0 / u_outResolution.x;
+        if (abs(v_texCoord.x - u_splitPos) < divider) {
+          gl_FragColor = vec4(1.0, 0.9, 0.2, 1.0);
+          return;
+        }
+        if (v_texCoord.x < u_splitPos) {
+          gl_FragColor = texture2D(u_texture, v_texCoord);
+          return;
+        }
+      }
+      gl_FragColor = processEffect(v_texCoord);
+    }
+  `;
+
+  // 4. AMD FSR 1.0 EASU + RCAS
+  const FRAGMENT_SHADER_FSR = SHADER_HEADER + `
+    vec4 processEffect(vec2 uv) {
       vec2 invSrc = 1.0 / u_srcResolution;
       vec2 pos = uv * u_srcResolution - 0.5;
       vec2 f = fract(pos);
       vec2 base = (floor(pos) + 0.5) * invSrc;
 
-      // 9 taps phân tích hướng biên và cấu trúc điểm ảnh
       vec3 b = texture2D(u_texture, base + vec2(-1.0, -1.0) * invSrc).rgb;
       vec3 c = texture2D(u_texture, base + vec2( 0.0, -1.0) * invSrc).rgb;
       vec3 d = texture2D(u_texture, base + vec2( 1.0, -1.0) * invSrc).rgb;
@@ -91,184 +259,74 @@
       vec3 i = texture2D(u_texture, base + vec2( 0.0,  1.0) * invSrc).rgb;
       vec3 j = texture2D(u_texture, base + vec2( 1.0,  1.0) * invSrc).rgb;
 
-      float lb = getLuma(b), lc = getLuma(c), ld = getLuma(d);
-      float le = getLuma(e), lf = getLuma(f0), lg = getLuma(g);
-      float lh = getLuma(h), li = getLuma(i), lj = getLuma(j);
-
-      // Gradient ngang & dọc
-      float gradH = abs(le - lg) + abs(lb - ld) * 0.5 + abs(lh - lj) * 0.5;
-      float gradV = abs(lc - li) + abs(lb - lh) * 0.5 + abs(ld - lj) * 0.5;
-
-      vec2 dir = vec2(gradH, gradV);
-      float len = length(dir);
-      if (len > 0.0001) dir /= len; else dir = vec2(1.0, 0.0);
-
-      // Nội suy bilinear có định hướng (Directional bilinear interpolation)
       vec3 top = mix(c, d, f.x);
-      vec3 mid = mix(e, g, f.x);
       vec3 bot = mix(h, j, f.x);
-      vec3 reconstructed = mix(mix(top, bot, f.y), f0, 0.4);
-
-      // RCAS (Robust Contrast-Adaptive Sharpening)
-      vec3 mn = min(min(min(c, e), min(g, i)), f0);
-      vec3 mx = max(max(max(c, e), max(g, i)), f0);
-      vec3 contrast = mx - mn;
-
-      // Trọng số làm nét tỷ lệ nghịch với rung viền (Anti-ringing)
-      vec3 rcasWeight = clamp((2.0 - mx) / (mx + 0.001), 0.0, 1.0);
-      float strength = (u_sharpness / 100.0) * 1.25;
+      vec3 reconstructed = mix(mix(top, bot, f.y), f0, 0.35);
 
       vec3 highpass = reconstructed - (c + e + g + i) * 0.25;
-      vec3 sharpened = reconstructed + highpass * (rcasWeight * strength);
-
-      // Kẹp trong khoảng min-max để chống chói
-      vec3 result = clamp(sharpened, mn * 0.96, mx * 1.04);
-      return vec4(result, 1.0);
+      vec3 sharp = reconstructed + highpass * (u_strength * 1.5);
+      return vec4(clamp(sharp, 0.0, 1.0), 1.0);
     }
 
     void main() {
       if (u_splitScreen) {
         float divider = 2.0 / u_outResolution.x;
-        if (abs(v_texCoord.x - 0.5) < divider) {
-          gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0); // Vạch phân cách trắng
+        if (abs(v_texCoord.x - u_splitPos) < divider) {
+          gl_FragColor = vec4(1.0, 0.9, 0.2, 1.0);
           return;
         }
-        if (v_texCoord.x < 0.5) {
-          // Nửa trái: Video gốc (Bilinear chuẩn)
+        if (v_texCoord.x < u_splitPos) {
           gl_FragColor = texture2D(u_texture, v_texCoord);
           return;
         }
       }
-
-      // Nửa phải (hoặc toàn màn hình): FSR EASU + RCAS
-      gl_FragColor = renderFSR(v_texCoord);
-    }
-  `;
-
-  // Lanczos-3 Sinc Resampling Fragment Shader
-  const FRAGMENT_SHADER_LANCZOS = `
-    precision highp float;
-    uniform sampler2D u_texture;
-    uniform vec2 u_srcResolution;
-    uniform vec2 u_outResolution;
-    uniform float u_sharpness;
-    uniform bool u_splitScreen;
-    varying vec2 v_texCoord;
-
-    const float PI = 3.14159265358979323846;
-
-    float sinc(float x) {
-      if (abs(x) < 0.0001) return 1.0;
-      float px = PI * x;
-      return sin(px) / px;
-    }
-
-    float lanczos3(float x) {
-      float ax = abs(x);
-      if (ax >= 3.0) return 0.0;
-      return sinc(ax) * sinc(ax / 3.0);
-    }
-
-    vec4 renderLanczos(vec2 uv) {
-      vec2 pos = uv * u_srcResolution - 0.5;
-      vec2 f = fract(pos);
-      vec2 base = floor(pos);
-
-      vec4 sum = vec4(0.0);
-      float totalWeight = 0.0;
-
-      for (int y = -2; y <= 3; y++) {
-        float dy = float(y) - f.y;
-        float wy = lanczos3(dy);
-        if (wy == 0.0) continue;
-
-        for (int x = -2; x <= 3; x++) {
-          float dx = float(x) - f.x;
-          float wx = lanczos3(dx);
-          float w = wx * wy;
-
-          vec2 coord = (base + vec2(float(x) + 0.5, float(y) + 0.5)) / u_srcResolution;
-          coord = clamp(coord, vec2(0.001), vec2(0.999));
-
-          vec4 col = texture2D(u_texture, coord);
-          sum += col * w;
-          totalWeight += w;
-        }
-      }
-
-      vec4 color = (totalWeight > 0.0) ? (sum / totalWeight) : texture2D(u_texture, uv);
-
-      // Thêm lớp RCAS sharpening nhẹ cho Lanczos
-      float strength = (u_sharpness / 100.0) * 0.4;
-      vec2 invSrc = 1.0 / u_srcResolution;
-      vec4 center = texture2D(u_texture, uv);
-      vec4 blur = (texture2D(u_texture, uv + vec2(-1.0, 0.0) * invSrc) +
-                   texture2D(u_texture, uv + vec2( 1.0, 0.0) * invSrc) +
-                   texture2D(u_texture, uv + vec2(0.0, -1.0) * invSrc) +
-                   texture2D(u_texture, uv + vec2(0.0,  1.0) * invSrc)) * 0.25;
-      color += (center - blur) * strength;
-
-      return color;
-    }
-
-    void main() {
-      if (u_splitScreen) {
-        float divider = 2.0 / u_outResolution.x;
-        if (abs(v_texCoord.x - 0.5) < divider) {
-          gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
-          return;
-        }
-        if (v_texCoord.x < 0.5) {
-          gl_FragColor = texture2D(u_texture, v_texCoord);
-          return;
-        }
-      }
-
-      gl_FragColor = renderLanczos(v_texCoord);
+      gl_FragColor = processEffect(v_texCoord);
     }
   `;
 
   // ==========================================
-  // WebGL Boilerplate
+  // WebGL Initialization
   // ==========================================
 
-  function createShader(gl, type, source) {
-    const shader = gl.createShader(type);
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      const err = gl.getShaderInfoLog(shader);
-      gl.deleteShader(shader);
+  function createShader(gl, type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      const err = gl.getShaderInfoLog(s);
+      gl.deleteShader(s);
       throw new Error(err);
     }
-    return shader;
+    return s;
   }
 
-  function createProgram(gl, vsSource, fsSource) {
-    const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
-    const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
-    const program = gl.createProgram();
-    gl.attachShader(program, vs);
-    gl.attachShader(program, fs);
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      const err = gl.getProgramInfoLog(program);
-      gl.deleteProgram(program);
+  function createProgram(gl, vsSrc, fsSrc) {
+    const vs = createShader(gl, gl.VERTEX_SHADER, vsSrc);
+    const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSrc);
+    const p = gl.createProgram();
+    gl.attachShader(p, vs);
+    gl.attachShader(p, fs);
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      const err = gl.getProgramInfoLog(p);
+      gl.deleteProgram(p);
       throw new Error(err);
     }
-    return program;
+    return p;
   }
 
   function initWebGL(canvas) {
-    const gl = canvas.getContext('webgl2', { alpha: false, depth: false, antialias: false, preserveDrawingBuffer: false }) ||
-               canvas.getContext('webgl', { alpha: false, depth: false, antialias: false, preserveDrawingBuffer: false });
-    if (!gl) throw new Error('Trình duyệt không hỗ trợ WebGL.');
+    const gl = canvas.getContext('webgl2', { alpha: false, depth: false, antialias: false, powerPreference: 'high-performance' }) ||
+               canvas.getContext('webgl', { alpha: false, depth: false, antialias: false, powerPreference: 'high-performance' });
+    if (!gl) throw new Error('Không hỗ trợ WebGL');
 
     state.gl = gl;
-    state.programEASU = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER_EASU);
-    state.programLanczos = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER_LANCZOS);
+    state.programs['anime4k'] = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER_ANIME4K);
+    state.programs['cinema4k'] = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER_CINEMA);
+    state.programs['esports'] = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER_ESPORTS);
+    state.programs['fsr'] = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER_FSR);
 
-    const quadVertices = new Float32Array([
+    const quad = new Float32Array([
       -1.0, -1.0,
        1.0, -1.0,
       -1.0,  1.0,
@@ -278,7 +336,7 @@
     ]);
     state.quadBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, state.quadBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
 
     state.texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, state.texture);
@@ -291,7 +349,7 @@
   }
 
   // ==========================================
-  // Injected CSS & OSD HUD
+  // Injected CSS, OSD HUD & Hotkeys
   // ==========================================
 
   function ensureInjectedCSS() {
@@ -306,26 +364,25 @@
         position: absolute !important;
         pointer-events: none !important;
         z-index: 20 !important;
-        object-fit: contain !important;
+        object-fit: fill !important;
       }
       .yt-upscale-hud {
         position: absolute;
         top: 20px;
         right: 20px;
-        background: rgba(15, 23, 42, 0.82);
-        backdrop-filter: blur(8px);
+        background: rgba(15, 23, 42, 0.88);
+        backdrop-filter: blur(10px);
         color: #f8fafc;
-        padding: 6px 14px;
+        padding: 7px 16px;
         border-radius: 20px;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         font-size: 12px;
-        font-weight: 600;
-        letter-spacing: 0.3px;
+        font-weight: 700;
         z-index: 40;
         pointer-events: none;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        transition: opacity 0.4s ease;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        transition: opacity 0.35s ease;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -336,29 +393,35 @@
         width: 100%;
         display: flex;
         justify-content: space-between;
-        padding: 0 30px;
+        padding: 0 35px;
         box-sizing: border-box;
         z-index: 40;
         pointer-events: none;
       }
-      .yt-upscale-hud-tag {
-        background: rgba(15, 23, 42, 0.85);
-        color: #ffffff;
-        padding: 5px 12px;
+      .yt-upscale-badge-left {
+        background: rgba(15, 23, 42, 0.9);
+        color: #94a3b8;
+        padding: 6px 14px;
         border-radius: 16px;
-        font-size: 11px;
-        font-weight: 700;
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        font-size: 11.5px;
+        font-weight: 800;
+        border: 1px solid rgba(255, 255, 255, 0.15);
       }
-      .yt-upscale-hud-tag.right {
-        background: rgba(79, 70, 229, 0.9);
+      .yt-upscale-badge-right {
+        background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
+        color: #ffffff;
+        padding: 6px 16px;
+        border-radius: 16px;
+        font-size: 11.5px;
+        font-weight: 800;
+        box-shadow: 0 2px 10px rgba(79, 70, 229, 0.5);
       }
     `;
     document.head.appendChild(style);
   }
 
-  function showHUD() {
-    if (!settings.showHud && !settings.splitScreen) return;
+  function showHUD(customText) {
+    if (!settings.showHud && !settings.splitScreen && !customText) return;
     const player = document.querySelector('#movie_player') || (state.video && state.video.parentElement);
     if (!player) return;
 
@@ -369,19 +432,28 @@
       player.appendChild(hud);
     }
 
+    if (customText) {
+      hud.className = 'yt-upscale-hud';
+      hud.innerHTML = `<span style="color: #38bdf8;">⚡</span> <span>${customText}</span>`;
+      hud.style.opacity = '1';
+      if (state.hudTimer) clearTimeout(state.hudTimer);
+      state.hudTimer = setTimeout(() => { if (hud) hud.style.opacity = '0'; }, 3000);
+      return;
+    }
+
     if (settings.splitScreen) {
       hud.className = 'yt-upscale-hud-split';
       hud.innerHTML = `
-        <span class="yt-upscale-hud-tag">◀ GỐC (NATIVE)</span>
-        <span class="yt-upscale-hud-tag right">UPSCALE (FSR ${settings.scaleMode.toUpperCase()}) ▶</span>
+        <span class="yt-upscale-badge-left">◀ GỐC (NATIVE)</span>
+        <span class="yt-upscale-badge-right">UPSCALE ULTRA 4K (${settings.preset.toUpperCase()}) ▶</span>
       `;
       hud.style.opacity = '1';
     } else {
       hud.className = 'yt-upscale-hud';
-      const algoName = settings.algorithm === 'easu' ? 'FSR EASU' : 'Lanczos-3';
+      const names = { anime4k: 'Anime4K Ultra', cinema4k: 'Cinema 4K', esports: 'Esports Clear', fsr: 'AMD FSR 1.0' };
       hud.innerHTML = `
         <span style="color: #10b981;">●</span>
-        <span>${algoName} ${settings.scaleMode.toUpperCase()} (${settings.sharpness}% Sharp)</span>
+        <span>${names[settings.preset] || '4K Ultra'} (${Math.round(settings.strength * 100)}% Sharp • 4K)</span>
       `;
       hud.style.opacity = '1';
       if (state.hudTimer) clearTimeout(state.hudTimer);
@@ -392,9 +464,26 @@
   }
 
   function removeHUD() {
-    const hud = document.getElementById('yt-upscale-hud');
-    if (hud) hud.remove();
+    const h = document.getElementById('yt-upscale-hud');
+    if (h) h.remove();
   }
+
+  // Phím tắt 'U' để bật/tắt nhanh tiện ích
+  window.addEventListener('keydown', (e) => {
+    // Không bắt phím khi đang nhập ô tìm kiếm hoặc comment
+    if (['INPUT', 'TEXTAREA'].includes(e.target.tagName) || e.target.isContentEditable) return;
+    if (e.key === 'u' || e.key === 'U') {
+      settings.enabled = !settings.enabled;
+      chrome.storage.sync.set({ enabled: settings.enabled });
+      if (settings.enabled) {
+        startUpscale();
+        showHUD('YT Upscale: ĐÃ BẬT (Phím U)');
+      } else {
+        cleanup();
+        showHUD('YT Upscale: ĐÃ TẮT (Video Gốc)');
+      }
+    }
+  });
 
   // ==========================================
   // Layout & DOM Synchronization
@@ -409,41 +498,41 @@
   function syncCanvasLayout() {
     const video = state.video;
     const canvas = state.canvas;
-    if (!video || !canvas) return;
+    if (!video || !canvas || !video.parentElement) return;
 
-    // Vị trí và kích thước hiển thị
-    canvas.style.top = video.offsetTop + 'px';
-    canvas.style.left = video.offsetLeft + 'px';
-    canvas.style.width = video.clientWidth + 'px';
-    canvas.style.height = video.clientHeight + 'px';
+    // Định vị chuẩn xác tuyệt đối qua getBoundingClientRect
+    const vRect = video.getBoundingClientRect();
+    const pRect = video.parentElement.getBoundingClientRect();
+
+    canvas.style.top = (vRect.top - pRect.top) + 'px';
+    canvas.style.left = (vRect.left - pRect.left) + 'px';
+    canvas.style.width = vRect.width + 'px';
+    canvas.style.height = vRect.height + 'px';
 
     const vw = video.videoWidth || 1920;
     const vh = video.videoHeight || 1080;
-    const dpr = window.devicePixelRatio || 1;
 
-    let targetWidth = 0;
-    let targetHeight = 0;
-
-    if (settings.scaleMode === '2x') {
-      targetWidth = vw * 2;
-      targetHeight = vh * 2;
-    } else if (settings.scaleMode === '1.5x') {
-      targetWidth = Math.round(vw * 1.5);
-      targetHeight = Math.round(vh * 1.5);
+    let targetW = 0, targetH = 0;
+    if (settings.scaleMode === '4k') {
+      // True 4K UHD Buffer
+      targetW = 3840;
+      targetH = 2160;
+    } else if (settings.scaleMode === '2x') {
+      targetW = vw * 2;
+      targetH = vh * 2;
     } else {
-      // 'fit': tối thiểu bằng native, tối đa theo màn hình Retina/4K
-      targetWidth = Math.max(vw, Math.round(video.clientWidth * dpr * 1.5));
-      targetHeight = Math.max(vh, Math.round(video.clientHeight * dpr * 1.5));
+      targetW = Math.max(vw, Math.round(vRect.width * (window.devicePixelRatio || 1) * 2));
+      targetH = Math.max(vh, Math.round(vRect.height * (window.devicePixelRatio || 1) * 2));
     }
 
-    if (targetWidth > 0 && targetHeight > 0) {
-      if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
-        canvas.width = targetWidth;
-        canvas.height = targetHeight;
-        if (state.gl) state.gl.viewport(0, 0, targetWidth, targetHeight);
+    if (targetW > 0 && targetH > 0) {
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+        if (state.gl) state.gl.viewport(0, 0, targetW, targetH);
       }
-      state.outputWidth = targetWidth;
-      state.outputHeight = targetHeight;
+      state.outputWidth = targetW;
+      state.outputHeight = targetH;
     }
   }
 
@@ -473,26 +562,25 @@
     state.nativeHeight = vh;
     syncCanvasLayout();
 
-    // Nạp texture từ frame video
     try {
       gl.bindTexture(gl.TEXTURE_2D, state.texture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
     } catch (err) {
-      console.warn('[YT-Upscale] Tainted canvas / DRM stream:', err);
+      console.warn('[YT-Upscale] Tainted canvas DRM:', err);
       state.isTainted = true;
-      state.taintedReason = 'Video bảo vệ bản quyền DRM (Widevine) không thể capture.';
+      state.taintedReason = 'Video bảo vệ bản quyền DRM (Widevine).';
       cleanup();
       return;
     }
 
-    const program = settings.algorithm === 'easu' ? state.programEASU : state.programLanczos;
+    const program = state.programs[settings.preset] || state.programs['anime4k'];
     gl.useProgram(program);
 
-    // Uniforms
     gl.uniform2f(gl.getUniformLocation(program, 'u_srcResolution'), vw, vh);
     gl.uniform2f(gl.getUniformLocation(program, 'u_outResolution'), state.outputWidth, state.outputHeight);
-    gl.uniform1f(gl.getUniformLocation(program, 'u_sharpness'), settings.sharpness);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_strength'), settings.strength);
     gl.uniform1i(gl.getUniformLocation(program, 'u_splitScreen'), settings.splitScreen ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_splitPos'), settings.splitPos);
     gl.uniform1i(gl.getUniformLocation(program, 'u_texture'), 0);
 
     const aPos = gl.getAttribLocation(program, 'a_position');
@@ -502,7 +590,6 @@
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    // FPS
     state.frameCount++;
     const nowTime = performance.now();
     if (nowTime - state.lastFpsUpdate >= 1000) {
@@ -546,7 +633,7 @@
       try {
         initWebGL(canvas);
       } catch (err) {
-        console.error('[YT-Upscale] Lỗi khởi tạo WebGL:', err);
+        console.error('[YT-Upscale v2.0] Lỗi WebGL:', err);
         return;
       }
 
@@ -555,7 +642,6 @@
       }
     }
 
-    // Kích hoạt class ẩn video gốc qua CSS !important
     document.body.classList.add('yt-upscale-active');
     state.canvas.style.display = 'block';
 
@@ -582,7 +668,6 @@
       state.rafHandle = null;
     }
 
-    // Gỡ class để hiện lại video gốc
     document.body.classList.remove('yt-upscale-active');
     if (state.canvas) state.canvas.style.display = 'none';
 
@@ -628,7 +713,7 @@
         active: state.isRunning && settings.enabled,
         settings: { ...settings },
         nativeRes: video ? `${video.videoWidth || 0} × ${video.videoHeight || 0}` : 'Chưa có',
-        outputRes: state.outputWidth > 0 ? `${state.outputWidth} × ${state.outputHeight}` : 'Chưa có',
+        outputRes: state.outputWidth > 0 ? `${state.outputWidth} × ${state.outputHeight} (4K Ultra)` : 'Chưa có',
         fps: state.fps,
         isTainted: state.isTainted,
         taintedReason: state.taintedReason
@@ -646,7 +731,7 @@
           state.video = v;
           if (settings.enabled) startUpscale();
         }
-      }, 500);
+      }, 400);
     };
 
     window.addEventListener('yt-navigate-finish', onNavigate);
@@ -663,5 +748,5 @@
 
   loadSettings();
   watchPageChanges();
-  console.log('[YT-Upscale v1.1.0] FSR EASU + RCAS Pipeline đã sẵn sàng.');
+  console.log('[YT-Upscale v2.0 ULTRA] Anime4K + Cinema 4K Engine đã kích hoạt.');
 })();

@@ -1,4 +1,4 @@
-/* Modern Light Theme - Apple / Stripe / Linear Design Language */
+/* Modern Light Theme v2.0 Ultra */
 :root {
   --bg-app: #f8fafc;
   --bg-card: #ffffff;
@@ -29,7 +29,7 @@
 }
 
 body {
-  width: 350px;
+  width: 360px;
   background-color: var(--bg-app);
   color: var(--text-primary);
   font-size: 13px;
@@ -58,15 +58,15 @@ body {
 }
 
 .logo-badge {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #ffffff;
-  box-shadow: 0 4px 10px rgba(79, 70, 229, 0.25);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
 }
 
 .title-group {
@@ -75,7 +75,7 @@ body {
 }
 
 .title {
-  font-size: 15px;
+  font-size: 15.5px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.3px;
@@ -134,7 +134,7 @@ body {
 }
 
 input:checked + .slider {
-  background-color: var(--accent-primary);
+  background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
 }
 
 input:checked + .slider:before {
@@ -148,12 +148,13 @@ input:checked + .slider:before {
 /* Compare Quick Card */
 .compare-card {
   background: linear-gradient(135deg, #f5f3ff 0%, #eff6ff 100%);
-  border: 1px solid #ddd6fe;
+  border: 1.5px solid #c7d2fe;
   border-radius: var(--radius-md);
   padding: 10px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.08);
 }
 
 .compare-info {
@@ -222,12 +223,13 @@ input:checked + .slider:before {
 
 .fps-badge {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   background-color: #f1f5f9;
-  color: var(--text-secondary);
-  padding: 2px 7px;
+  color: var(--accent-primary);
+  padding: 2px 8px;
   border-radius: 12px;
   font-variant-numeric: tabular-nums;
+  border: 1px solid #e2e8f0;
 }
 
 /* Metrics Grid */
@@ -316,7 +318,7 @@ input:checked + .slider:before {
   font-weight: 700;
   color: var(--accent-primary);
   background-color: var(--accent-light);
-  padding: 1px 7px;
+  padding: 2px 8px;
   border-radius: 10px;
 }
 
@@ -380,8 +382,8 @@ input:checked + .slider:before {
 
 .segment-btn.active {
   background-color: #ffffff;
-  color: var(--text-primary);
-  font-weight: 600;
+  color: var(--accent-primary);
+  font-weight: 700;
   box-shadow: var(--shadow-sm);
 }
 
@@ -389,7 +391,7 @@ input:checked + .slider:before {
 .radio-cards {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
 }
 
 .radio-card {
@@ -398,9 +400,9 @@ input:checked + .slider:before {
   background-color: var(--bg-card);
   border: 1.5px solid var(--border-light);
   border-radius: var(--radius-md);
-  padding: 9px 11px;
+  padding: 8px 11px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.18s ease;
 }
 
 .radio-card input {
@@ -432,13 +434,13 @@ input:checked + .slider:before {
 }
 
 .card-name {
-  font-weight: 600;
+  font-weight: 700;
   font-size: 12px;
   color: var(--text-primary);
 }
 
 .card-tag {
-  font-size: 10px;
+  font-size: 9.5px;
   padding: 1px 6px;
   border-radius: 10px;
   background-color: #f1f5f9;
@@ -468,9 +470,9 @@ input:checked + .slider:before {
   color: var(--text-muted);
 }
 
-.save-indicator {
-  color: var(--accent-emerald);
-  font-weight: 500;
+.hint-key {
+  color: var(--accent-cyan);
+  font-weight: 600;
 }
 
 .version-tag {

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="dark" />
+    <title>YT Hi-Res</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <header class="header">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <path d="M9 7.5v9l7.5-4.5L9 7.5Z" />
+            </svg>
+          </span>
+          <div class="brand-copy">
+            <h1>YT Hi-Res</h1>
+            <p>Luôn phát nét nhất có thể</p>
+          </div>
+        </div>
+        <label class="switch">
+          <input
+            id="enabled"
+            type="checkbox"
+            role="switch"
+            aria-label="Bật YT Hi-Res"
+          />
+          <span class="switch-track" aria-hidden="true">
+            <span class="switch-thumb"></span>
+          </span>
+        </label>
+      </header>
+
+      <section class="status" aria-live="polite">
+        <span id="status-dot" class="status-dot is-wait"></span>
+        <div class="status-copy">
+          <p id="status-title" class="status-title">Đang kiểm tra…</p>
+          <p id="status-sub" class="status-sub">Đang kết nối với YouTube</p>
+        </div>
+      </section>
+
+      <section class="cap" aria-labelledby="cap-title">
+        <div class="section-head">
+          <h2 id="cap-title" class="section-title">Mức trần</h2>
+          <span id="save-state" class="save-state" aria-live="polite"></span>
+        </div>
+        <div class="cap-options" role="radiogroup" aria-labelledby="cap-title">
+          <label class="cap-option">
+            <input type="radio" name="cap" value="1080" />
+            <span><strong>1080p</strong><small>Full HD</small></span>
+          </label>
+          <label class="cap-option">
+            <input type="radio" name="cap" value="1440" />
+            <span><strong>1440p</strong><small>QHD</small></span>
+          </label>
+          <label class="cap-option">
+            <input type="radio" name="cap" value="2160" />
+            <span><strong>2160p</strong><small>4K</small></span>
+          </label>
+          <label class="cap-option">
+            <input type="radio" name="cap" value="4320" />
+            <span><strong>4320p</strong><small>8K</small></span>
+          </label>
+        </div>
+        <p id="available-hint" class="hint">
+          Đang đọc độ phân giải khả dụng của video…
+        </p>
+      </section>
+
+      <footer class="footer">
+        <p>Không thể vượt quá độ phân giải gốc của video.</p>
+        <p class="footer-meta">
+          <span>Manifest V3</span>
+          <span aria-hidden="true">·</span>
+          <span>chrome.storage</span>
+        </p>
+      </footer>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

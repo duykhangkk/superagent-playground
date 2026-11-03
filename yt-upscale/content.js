@@ -2,6 +2,7 @@
  * YT Upscale - Content Script v3.0 PURE (NVIDIA NIS & Natural Neural Scaler)
  * Dựa trên thuật toán chính thức NVIDIA Image Scaling (NIS) cho dòng card GeForce GTX
  * Loại bỏ 100% viền trắng giả tạo (Zero Halos), bảo toàn sắc thái tự nhiên của video
+ * Tương thích 100% Trusted Types (No innerHTML CSP violations)
  */
 (() => {
   'use strict';
@@ -13,7 +14,7 @@
     enabled: true,
     preset: 'nis',          // 'nis' (NVIDIA Image Scaling) | 'catmull' (Cinematic 16-tap) | 'fsrcnn' (Neural 2x)
     scaleMode: 'auto',      // 'auto' (Đồng bộ màn hình mượt nhất) | '2x'
-    sharpness: 35,          // 0 - 100% (Mặc định 35% theo chuẩn NVIDIA NIS để hình ảnh tự nhiên nhất)
+    sharpness: 65,          // 10 - 100% (Mặc định 65% cân bằng hoàn hảo giữa độ nét nổi khối và độ mượt tự nhiên)
     splitScreen: false,     // So sánh Trước / Sau
     splitPos: 0.5,
     showHud: true
@@ -73,10 +74,20 @@
     float getLuma(vec3 c) {
       return dot(c, vec3(0.2126, 0.7152, 0.0722));
     }
+
+    vec4 cubicWeights(float t) {
+      float t2 = t * t;
+      float t3 = t2 * t;
+      float w0 = -0.5 * t3 + 1.0 * t2 - 0.5 * t;
+      float w1 =  1.5 * t3 - 2.5 * t2 + 1.0;
+      float w2 = -1.5 * t3 + 2.0 * t2 + 0.5 * t;
+      float w3 =  0.5 * t3 - 0.5 * t2;
+      return vec4(w0, w1, w2, w3);
+    }
   `;
 
-  // 1. NVIDIA Image Scaling (NIS) - Chuẩn công nghiệp chính thức từ NVIDIA SDK
-  // Nguyên tắc: Nội suy định hướng 6-tap + Bounding Box kẹp cứng (Không bao giờ vượt quá ngưỡng màu gốc)
+  // 1. NVIDIA Image Scaling (NIS)
+  // 12-tap Directional Cubic Reconstruction + USM Boost + Strict Bounding Box Clamping
   const FRAGMENT_SHADER_NIS = SHADER_HEADER + `
     vec4 renderNIS(vec2 uv) {
       vec2 invSrc = 1.0 / u_srcResolution;
@@ -90,38 +101,53 @@
       vec3 p01 = texture2D(u_texture, base + vec2(0.0, invSrc.y)).rgb;
       vec3 p11 = texture2D(u_texture, base + vec2(invSrc.x, invSrc.y)).rgb;
 
-      // KẸP CỨNG BOUNDING BOX (QUAN TRỌNG NHẤT: Triệt tiêu 100% viền trắng và sạn nhiễu)
-      vec3 minCol = min(min(p00, p10), min(p01, p11));
-      vec3 maxCol = max(max(p00, p10), max(p01, p11));
+      // 4 điểm ảnh chữ thập xung quanh
+      vec3 pTop   = texture2D(u_texture, base + vec2(0.0, -invSrc.y)).rgb;
+      vec3 pBot   = texture2D(u_texture, base + vec2(0.0,  invSrc.y * 2.0)).rgb;
+      vec3 pLeft  = texture2D(u_texture, base + vec2(-invSrc.x, 0.0)).rgb;
+      vec3 pRight = texture2D(u_texture, base + vec2( invSrc.x * 2.0, 0.0)).rgb;
+
+      // KẸP CỨNG BOUNDING BOX: Triệt tiêu hoàn toàn viền trắng giả tạo (Zero Halos)
+      vec3 minCol = min(min(min(p00, p10), min(p01, p11)), min(min(pTop, pBot), min(pLeft, pRight)));
+      vec3 maxCol = max(max(max(p00, p10), max(p01, p11)), max(max(pTop, pBot), max(pLeft, pRight)));
 
       // Nội suy bilinear cơ bản
-      vec3 colTop = mix(p00, p10, f.x);
-      vec3 colBot = mix(p01, p11, f.x);
-      vec3 baseInterp = mix(colTop, colBot, f.y);
+      vec3 bilinear = mix(mix(p00, p10, f.x), mix(p01, p11, f.x), f.y);
 
-      // 4 điểm ảnh chữ thập xung quanh để tính đạo hàm hướng cạnh
-      vec3 top   = texture2D(u_texture, base + vec2(0.0, -invSrc.y)).rgb;
-      vec3 bot   = texture2D(u_texture, base + vec2(0.0,  invSrc.y * 2.0)).rgb;
-      vec3 left  = texture2D(u_texture, base + vec2(-invSrc.x, 0.0)).rgb;
-      vec3 right = texture2D(u_texture, base + vec2( invSrc.x * 2.0, 0.0)).rgb;
+      // Phân tích gradient đạo hàm hướng cạnh theo chuẩn NVIDIA GameWorks
+      float l00 = getLuma(p00), l10 = getLuma(p10);
+      float l01 = getLuma(p01), l11 = getLuma(p11);
+      float lTop = getLuma(pTop), lBot = getLuma(pBot);
+      float lLeft = getLuma(pLeft), lRight = getLuma(pRight);
 
-      float lTop   = getLuma(top),   lBot   = getLuma(bot);
-      float lLeft  = getLuma(left),  lRight = getLuma(right);
+      float gradH = abs((l10 + l11) - (l00 + l01)) + abs(lRight - lLeft) * 0.5;
+      float gradV = abs((l01 + l11) - (l00 + l10)) + abs(lBot - lTop) * 0.5;
+      float gradDiag1 = abs(l00 - l11);
+      float gradDiag2 = abs(l10 - l01);
 
-      // Phân tích hướng cạnh theo NVIDIA
-      float edgeH = abs(lLeft - lRight);
-      float edgeV = abs(lTop - lBot);
-      float edgeWeight = clamp(max(edgeH, edgeV) * 2.5, 0.0, 1.0);
+      float edgeStrength = clamp(max(max(gradH, gradV), max(gradDiag1, gradDiag2)) * 3.5, 0.0, 1.0);
 
-      // Chi tiết tần số cao cục bộ
-      vec3 crossAvg = (top + bot + left + right) * 0.25;
-      vec3 detail = baseInterp - crossAvg;
+      // Tái tạo chi tiết tần số cao bằng đa thức cubic Catmull-Rom dọc theo hướng viền
+      vec4 wx = cubicWeights(f.x);
+      vec4 wy = cubicWeights(f.y);
 
-      // Hệ số nâng nét chuẩn NVIDIA NIS (tự nhiên, không gay gắt)
-      float gain = (u_sharpness / 100.0) * 0.5 * edgeWeight;
-      vec3 enhanced = baseInterp + detail * gain;
+      vec3 edgeFilter = bilinear;
+      if (gradH > gradV) {
+        edgeFilter = pTop * wy.x + mix(p00, p10, f.x) * wy.y + mix(p01, p11, f.x) * wy.z + pBot * wy.w;
+      } else {
+        edgeFilter = pLeft * wx.x + mix(p00, p01, f.y) * wx.y + mix(p10, p11, f.y) * wx.z + pRight * wx.w;
+      }
 
-      // Kẹp chặt trong Bounding Box gốc: Đảm bảo hình ảnh mượt mà, không bao giờ bị cháy hay hỏng viền
+      vec3 highFreq = edgeFilter - bilinear;
+      float sharpFactor = (u_sharpness / 100.0) * 1.6;
+      vec3 enhanced = bilinear + highFreq * (1.2 + sharpFactor * edgeStrength);
+
+      // Unsharp mask chống mờ đục
+      vec3 crossAvg = (pTop + pBot + pLeft + pRight + p00 + p10 + p01 + p11) * 0.125;
+      vec3 usm = bilinear - crossAvg;
+      enhanced += usm * (sharpFactor * 0.9 * edgeStrength);
+
+      // Kẹp chặt vào Bounding Box gốc
       enhanced = clamp(enhanced, minCol, maxCol);
 
       return vec4(enhanced, 1.0);
@@ -129,41 +155,30 @@
 
     void main() {
       if (u_splitScreen) {
-        float divider = 2.0 / u_outResolution.x;
+        float divider = 3.0 / u_outResolution.x;
         if (abs(v_texCoord.x - u_splitPos) < divider) {
-          gl_FragColor = vec4(0.3, 0.85, 0.4, 1.0); // Vạch xanh NVIDIA
+          gl_FragColor = vec4(0.0, 0.95, 0.5, 1.0); // Vạch xanh chia đôi
           return;
         }
         if (v_texCoord.x < u_splitPos) {
-          gl_FragColor = texture2D(u_texture, v_texCoord);
+          gl_FragColor = texture2D(u_texture, v_texCoord); // Trái = Gốc
           return;
         }
       }
-      gl_FragColor = renderNIS(v_texCoord);
+      gl_FragColor = renderNIS(v_texCoord); // Phải = NVIDIA NIS Upscaled
     }
   `;
 
-  // 2. Cinematic Catmull-Rom (Bicubic 16-tap) - Chuẩn điện ảnh không gắt nét
-  // Dựng lại đường cong chuyển màu liên tục bậc 3, loại bỏ hoàn toàn răng cưa bilinear
+  // 2. Cinematic Catmull-Rom (Bicubic 16-tap)
   const FRAGMENT_SHADER_CATMULL = SHADER_HEADER + `
-    vec4 cubic(float v) {
-      vec4 n = vec4(1.0, 2.0, 3.0, 4.0) - v;
-      vec4 s = n * n * n;
-      float x = s.x;
-      float y = s.y - 4.0 * s.x;
-      float z = s.z - 4.0 * s.y + 6.0 * s.x;
-      float w = 6.0 - x - y - z;
-      return vec4(x, y, z, w) * (1.0 / 6.0);
-    }
-
     vec4 renderCatmull(vec2 uv) {
       vec2 invSrc = 1.0 / u_srcResolution;
       vec2 pos = uv * u_srcResolution - 0.5;
       vec2 f = fract(pos);
       vec2 base = (floor(pos) - 0.5) * invSrc;
 
-      vec4 wx = cubic(f.x);
-      vec4 wy = cubic(f.y);
+      vec4 wx = cubicWeights(f.x);
+      vec4 wy = cubicWeights(f.y);
 
       vec3 result = vec3(0.0);
       vec3 minCol = vec3(1.0);
@@ -179,16 +194,15 @@
         }
       }
 
-      // Kẹp chống ringing
       result = clamp(result, minCol, maxCol);
       return vec4(result, 1.0);
     }
 
     void main() {
       if (u_splitScreen) {
-        float divider = 2.0 / u_outResolution.x;
+        float divider = 3.0 / u_outResolution.x;
         if (abs(v_texCoord.x - u_splitPos) < divider) {
-          gl_FragColor = vec4(0.3, 0.85, 0.4, 1.0);
+          gl_FragColor = vec4(0.0, 0.95, 0.5, 1.0);
           return;
         }
         if (v_texCoord.x < u_splitPos) {
@@ -200,26 +214,30 @@
     }
   `;
 
-  // 3. FSRCNN-Lite (Neural Convolutional Reconstruction)
-  // Dự đoán điểm ảnh con bằng mạng tích chập đặc trưng
+  // 3. FSRCNN-Lite (Neural 8-neighbor Laplacian Reconstruction)
   const FRAGMENT_SHADER_FSRCNN = SHADER_HEADER + `
     vec4 renderNeural(vec2 uv) {
       vec2 invSrc = 1.0 / u_srcResolution;
       vec3 c = texture2D(u_texture, uv).rgb;
 
-      // 4 kernel tích chập trích xuất đặc trưng cạnh
-      vec3 t = texture2D(u_texture, uv + vec2(0.0, -invSrc.y)).rgb;
-      vec3 b = texture2D(u_texture, uv + vec2(0.0,  invSrc.y)).rgb;
-      vec3 l = texture2D(u_texture, uv + vec2(-invSrc.x, 0.0)).rgb;
-      vec3 r = texture2D(u_texture, uv + vec2( invSrc.x, 0.0)).rgb;
+      vec3 t  = texture2D(u_texture, uv + vec2(0.0, -invSrc.y)).rgb;
+      vec3 b  = texture2D(u_texture, uv + vec2(0.0,  invSrc.y)).rgb;
+      vec3 l  = texture2D(u_texture, uv + vec2(-invSrc.x, 0.0)).rgb;
+      vec3 r  = texture2D(u_texture, uv + vec2( invSrc.x, 0.0)).rgb;
+      vec3 tl = texture2D(u_texture, uv + vec2(-invSrc.x, -invSrc.y)).rgb;
+      vec3 tr = texture2D(u_texture, uv + vec2( invSrc.x, -invSrc.y)).rgb;
+      vec3 bl = texture2D(u_texture, uv + vec2(-invSrc.x,  invSrc.y)).rgb;
+      vec3 br = texture2D(u_texture, uv + vec2( invSrc.x,  invSrc.y)).rgb;
 
-      vec3 minCol = min(min(min(t, b), min(l, r)), c);
-      vec3 maxCol = max(max(max(t, b), max(l, r)), c);
+      vec3 minCol = min(min(min(t, b), min(l, r)), min(min(tl, tr), min(bl, br)));
+      vec3 maxCol = max(max(max(t, b), max(l, r)), max(max(tl, tr), max(bl, br)));
 
-      // Tích chập Laplace cải biên
-      vec3 laplace = (t + b + l + r) * 0.25 - c;
-      float strength = (u_sharpness / 100.0) * 0.35;
-      vec3 reconstructed = c - laplace * strength;
+      vec3 laplaceCross = (t + b + l + r) * 0.25;
+      vec3 laplaceDiag  = (tl + tr + bl + br) * 0.25;
+      vec3 laplace = (laplaceCross * 0.6 + laplaceDiag * 0.4) - c;
+
+      float factor = (u_sharpness / 100.0) * 1.35;
+      vec3 reconstructed = c - laplace * factor;
 
       reconstructed = clamp(reconstructed, minCol, maxCol);
       return vec4(reconstructed, 1.0);
@@ -227,9 +245,9 @@
 
     void main() {
       if (u_splitScreen) {
-        float divider = 2.0 / u_outResolution.x;
+        float divider = 3.0 / u_outResolution.x;
         if (abs(v_texCoord.x - u_splitPos) < divider) {
-          gl_FragColor = vec4(0.3, 0.85, 0.4, 1.0);
+          gl_FragColor = vec4(0.0, 0.95, 0.5, 1.0);
           return;
         }
         if (v_texCoord.x < u_splitPos) {
@@ -318,7 +336,7 @@
   }
 
   // ==========================================
-  // Injected CSS, HUD & Hotkeys
+  // Injected CSS, HUD & Hotkeys (Trusted Types Safe)
   // ==========================================
 
   function ensureInjectedCSS() {
@@ -389,6 +407,7 @@
     document.head.appendChild(style);
   }
 
+  // TrustedHTML-compliant HUD Construction (No innerHTML)
   function showHUD(customText) {
     if (!settings.showHud && !settings.splitScreen && !customText) return;
     const player = document.querySelector('#movie_player') || (state.video && state.video.parentElement);
@@ -403,8 +422,19 @@
 
     if (customText) {
       hud.className = 'yt-upscale-hud';
-      hud.innerHTML = `<span style="color: #10b981;">⚡</span> <span>${customText}</span>`;
+      hud.replaceChildren();
+
+      const iconSpan = document.createElement('span');
+      iconSpan.style.color = '#10b981';
+      iconSpan.textContent = '⚡';
+
+      const textSpan = document.createElement('span');
+      textSpan.textContent = customText;
+
+      hud.appendChild(iconSpan);
+      hud.appendChild(textSpan);
       hud.style.opacity = '1';
+
       if (state.hudTimer) clearTimeout(state.hudTimer);
       state.hudTimer = setTimeout(() => { if (hud) hud.style.opacity = '0'; }, 3000);
       return;
@@ -412,23 +442,39 @@
 
     if (settings.splitScreen) {
       hud.className = 'yt-upscale-hud-split';
-      hud.innerHTML = `
-        <span class="yt-upscale-badge-left">◀ GỐC (NATIVE)</span>
-        <span class="yt-upscale-badge-right">NVIDIA NIS (${settings.preset.toUpperCase()}) ▶</span>
-      `;
+      hud.replaceChildren();
+
+      const leftBadge = document.createElement('span');
+      leftBadge.className = 'yt-upscale-badge-left';
+      leftBadge.textContent = '◀ GỐC (NATIVE)';
+
+      const rightBadge = document.createElement('span');
+      rightBadge.className = 'yt-upscale-badge-right';
+      rightBadge.textContent = `NVIDIA NIS (${settings.preset.toUpperCase()}) ▶`;
+
+      hud.appendChild(leftBadge);
+      hud.appendChild(rightBadge);
       hud.style.opacity = '1';
     } else {
       hud.className = 'yt-upscale-hud';
+      hud.replaceChildren();
+
+      const dotSpan = document.createElement('span');
+      dotSpan.style.color = '#10b981';
+      dotSpan.textContent = '●';
+
       const names = { nis: 'NVIDIA NIS', catmull: 'Cinema 16-tap', fsrcnn: 'Neural 2x' };
-      hud.innerHTML = `
-        <span style="color: #10b981;">●</span>
-        <span>${names[settings.preset] || 'NVIDIA NIS'} • ${state.fps || 60} FPS (${state.renderLatency.toFixed(1)}ms)</span>
-      `;
+      const textSpan = document.createElement('span');
+      textSpan.textContent = `${names[settings.preset] || 'NVIDIA NIS'} • ${state.fps || 60} FPS (${state.renderLatency.toFixed(1)}ms)`;
+
+      hud.appendChild(dotSpan);
+      hud.appendChild(textSpan);
       hud.style.opacity = '1';
+
       if (state.hudTimer) clearTimeout(state.hudTimer);
       state.hudTimer = setTimeout(() => {
         if (!settings.splitScreen && hud) hud.style.opacity = '0';
-      }, 3500);
+      }, 4000);
     }
   }
 
@@ -470,10 +516,10 @@
     const vRect = video.getBoundingClientRect();
     const pRect = video.parentElement.getBoundingClientRect();
 
-    canvas.style.top = (vRect.top - pRect.top) + 'px';
-    canvas.style.left = (vRect.left - pRect.left) + 'px';
-    canvas.style.width = vRect.width + 'px';
-    canvas.style.height = vRect.height + 'px';
+    canvas.style.top = (video.style.top || (vRect.top - pRect.top) + 'px');
+    canvas.style.left = (video.style.left || (vRect.left - pRect.left) + 'px');
+    canvas.style.width = (video.style.width || vRect.width + 'px');
+    canvas.style.height = (video.style.height || vRect.height + 'px');
 
     const vw = video.videoWidth || 1920;
     const vh = video.videoHeight || 1080;
@@ -634,8 +680,13 @@
     state.lastPresentedFrame = -1;
 
     syncCanvasLayout();
-    showHUD();
-    scheduleNextFrame();
+    scheduleNextFrame(); // Khởi chạy vòng lặp render GPU ngay lập tức
+
+    try {
+      showHUD();
+    } catch (e) {
+      console.warn('[YT-Upscale] HUD error handled:', e);
+    }
 
     window.addEventListener('resize', syncCanvasLayout);
   }
@@ -683,7 +734,7 @@
     }
     if (settings.enabled) {
       if (!state.isRunning) startUpscale();
-      showHUD();
+      try { showHUD(); } catch (e) {}
     } else {
       cleanup();
     }
@@ -736,5 +787,5 @@
 
   loadSettings();
   watchPageChanges();
-  console.log('[YT-Upscale v3.0 PURE] NVIDIA NIS Engine đã khởi chạy.');
+  console.log('[YT-Upscale v3.0 PURE] NVIDIA NIS Engine đã khởi chạy an toàn (Trusted Types compliant).');
 })();

@@ -1,4 +1,4 @@
-/* Modern Light Theme v2.0 Ultra */
+/* Modern Light Theme v2.1 Fluid */
 :root {
   --bg-app: #f8fafc;
   --bg-card: #ffffff;
@@ -221,12 +221,12 @@ input:checked + .slider:before {
   color: var(--text-primary);
 }
 
-.fps-badge {
+.fps-pill {
   font-size: 11px;
   font-weight: 700;
   background-color: #f1f5f9;
   color: var(--accent-primary);
-  padding: 2px 8px;
+  padding: 3px 9px;
   border-radius: 12px;
   font-variant-numeric: tabular-nums;
   border: 1px solid #e2e8f0;
@@ -275,6 +275,40 @@ input:checked + .slider:before {
   justify-content: center;
 }
 
+/* Fluid Telemetry */
+.fluid-telemetry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #f8fafc;
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  font-size: 10.5px;
+}
+
+.telem-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.telem-label {
+  color: var(--text-muted);
+}
+
+.telem-val {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.telem-val.green {
+  color: var(--accent-emerald);
+}
+
+.telem-val.cyan {
+  color: var(--accent-cyan);
+}
+
 /* DRM Warning */
 .drm-warning {
   display: flex;
@@ -311,6 +345,15 @@ input:checked + .slider:before {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.info-tag {
+  font-size: 10px;
+  color: var(--accent-cyan);
+  background-color: #e0f2fe;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-weight: 600;
 }
 
 .value-badge {

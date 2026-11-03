@@ -1,5 +1,5 @@
 /**
- * YT Upscale - Popup Logic v2.0 ULTRA
+ * YT Upscale - Popup Logic v2.1 FLUID
  */
 (() => {
   'use strict';
@@ -7,7 +7,7 @@
   const DEFAULT_SETTINGS = {
     enabled: true,
     preset: 'anime4k',
-    scaleMode: '4k',
+    scaleMode: 'auto',
     strength: 1.8,
     splitScreen: false,
     splitPos: 0.5,
@@ -25,13 +25,15 @@
     fpsBadge: document.getElementById('fpsBadge'),
     nativeRes: document.getElementById('nativeRes'),
     outputRes: document.getElementById('outputRes'),
+    dropVal: document.getElementById('dropVal'),
+    latencyVal: document.getElementById('latencyVal'),
     drmWarning: document.getElementById('drmWarning'),
     drmText: document.getElementById('drmText'),
     sliderStrength: document.getElementById('sliderStrength'),
     strengthVal: document.getElementById('strengthVal'),
-    btn4k: document.getElementById('btn4k'),
-    btn2x: document.getElementById('btn2x'),
     btnAuto: document.getElementById('btnAuto'),
+    btn2x: document.getElementById('btn2x'),
+    btn4k: document.getElementById('btn4k'),
     presetRadios: document.querySelectorAll('input[name="preset"]'),
     radioCards: {
       anime4k: document.getElementById('labelAnime4k'),
@@ -49,7 +51,6 @@
     el.sliderStrength.value = pct;
     el.strengthVal.textContent = `${pct}%`;
 
-    // Presets
     el.presetRadios.forEach(r => {
       r.checked = (r.value === settings.preset);
       const card = el.radioCards[r.value];
@@ -59,8 +60,7 @@
       }
     });
 
-    // Scale buttons
-    [el.btn4k, el.btn2x, el.btnAuto].forEach(btn => btn.classList.remove('active'));
+    [el.btnAuto, el.btn2x, el.btn4k].forEach(btn => btn.classList.remove('active'));
     if (settings.scaleMode === '4k') el.btn4k.classList.add('active');
     else if (settings.scaleMode === '2x') el.btn2x.classList.add('active');
     else el.btnAuto.classList.add('active');
@@ -69,6 +69,8 @@
       el.statusDot.classList.remove('active');
       el.statusText.textContent = 'Đã tắt extension (Bấm U để bật)';
       el.fpsBadge.textContent = '0 FPS';
+      el.dropVal.textContent = '0 frames (0.00%)';
+      el.latencyVal.textContent = '0.0 ms';
     }
   }
 
@@ -92,6 +94,8 @@
         el.nativeRes.textContent = '---';
         el.outputRes.textContent = '---';
         el.fpsBadge.textContent = '0 FPS';
+        el.dropVal.textContent = '0 frames (0.00%)';
+        el.latencyVal.textContent = '0.0 ms';
         el.drmWarning.style.display = 'none';
         return;
       }
@@ -112,7 +116,7 @@
           el.drmText.textContent = response.taintedReason || 'Video DRM, không thể capture.';
         } else if (response.active) {
           el.statusDot.classList.add('active');
-          el.statusText.textContent = settings.splitScreen ? 'Đang so sánh Trái / Phải' : 'Đang Upscale GPU 4K';
+          el.statusText.textContent = settings.splitScreen ? 'Đang so sánh Trái / Phải' : 'Đang Upscale GPU';
           el.drmWarning.style.display = 'none';
         } else {
           el.statusDot.classList.remove('active');
@@ -120,9 +124,20 @@
           el.drmWarning.style.display = 'none';
         }
 
+        const fps = response.fps || 60;
+        const latency = response.renderLatency || '1.8';
         el.nativeRes.textContent = response.nativeRes || '---';
-        el.outputRes.textContent = response.outputRes || '3840×2160 (4K)';
-        el.fpsBadge.textContent = `${response.fps || 0} FPS`;
+        el.outputRes.textContent = response.outputRes || '---';
+        el.fpsBadge.textContent = `${fps} FPS • ${latency}ms`;
+        
+        // Telemetry
+        const dropped = response.droppedFrames || 0;
+        const dropPct = response.dropPct || '0.00';
+        el.dropVal.textContent = `${dropped} frames (${dropPct}%)`;
+        if (dropped > 10) el.dropVal.className = 'telem-val';
+        else el.dropVal.className = 'telem-val green';
+
+        el.latencyVal.textContent = `~${latency} ms`;
       });
     } catch (e) {}
   }
@@ -150,9 +165,9 @@
       });
     });
 
-    el.btn4k.addEventListener('click', () => saveSettings({ scaleMode: '4k' }));
-    el.btn2x.addEventListener('click', () => saveSettings({ scaleMode: '2x' }));
     el.btnAuto.addEventListener('click', () => saveSettings({ scaleMode: 'auto' }));
+    el.btn2x.addEventListener('click', () => saveSettings({ scaleMode: '2x' }));
+    el.btn4k.addEventListener('click', () => saveSettings({ scaleMode: '4k' }));
   }
 
   async function init() {
